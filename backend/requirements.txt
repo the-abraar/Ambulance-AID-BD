@@ -6,4 +6,4 @@ alembic
 sqlalchemy
 jsonschema
 pyyaml
-psycopg[binary]
+psycopg[binary,pool]

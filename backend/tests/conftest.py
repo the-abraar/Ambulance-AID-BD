@@ -10,6 +10,8 @@ def target(tmp_path):
     if not url:
         return str(tmp_path / "t.db")
     import psycopg
+    from app.db import close_pools
+    close_pools()  # pooled connections would otherwise be killed under the pool's feet
     with psycopg.connect(url, autocommit=True) as c:
         # fixtures leave connections open inside a transaction; they would block the DROP
         c.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "

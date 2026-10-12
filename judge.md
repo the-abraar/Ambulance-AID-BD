@@ -291,3 +291,18 @@ Audited: 2026-10-12, single commit `5360cf1` ("docs: initial architecture..."). 
 
 **Not verified:** the GitHub CI workflows have never run; the pre-commit hook has never blocked a real commit; no real-device, real-user or real-host testing.
 **Next, first:** one fleet operator for a pilot; run the driver app on a real phone with real GPS; see Update 8.
+
+### Update 10 (2026-10-13): code gaps closed
+
+Edited at the user's explicit request (`AGENTS.md` otherwise says not to edit this file). Pushed in `953c5d3` and the commit after it.
+
+**Closed (rewrites the status of Update 8 gaps):**
+- Gap 3 (SQLite only): the app and migrations 0001-0004 run on Postgres; pytest passes on Postgres 16 locally (embedded server) and in GitHub CI (101 passed). PostGIS is still not used.
+- Gap 4 (one request at a time): the global lock is gone; one connection per request (SQLite WAL, or a Postgres pool). The ping rate limit lives in the `ping_limit` table, so it holds across workers. Concurrency tests cover a status race and a shared rate limit.
+- Gap 6 (token handling): `POST /drivers/{id}/token/rotate`, `.../revoke` and `POST /me/token/rotate`; tokens expire after 90 days (`users.token_expires_at`; the migration gives existing users 90 days from migration day). An expired dispatcher token cannot rotate itself: create a new one with `python -m app.bootstrap`.
+- Gap 2 (real phones): still open. Offline replay, denied GPS and the 429 message are now covered in headless Chromium (e2e: 34 checks), not on a real phone or real GPS.
+- Gap 8: the driver card shows 8 characters of the mission ID. HTTPS, the install icon, and the first GitHub CI run: CI has now run green (including the Postgres step).
+- Next-step item 6 is done; `docs/runbook-downtime.md` is a draft nobody has rehearsed.
+
+**Still open, unchanged:** gaps 1, 5, 7 and 9; next steps 1, 2, 4 (HTTPS, human review of auth code), 5, 7. No real operator, device, host or counsel review. Agent-written code has had no human review. The score in Update 8 (18%) should not move on this work alone.
+**Shortcuts remaining:** Postgres pool is a fixed 1-10 connections (`app/db.py`); no token expiry warning in the UI; the rate-limit table grows one row per vehicle and is never pruned.

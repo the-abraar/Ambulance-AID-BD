@@ -197,6 +197,15 @@ def run(base, dtok):
             return [await send(), await send(), await send()]; }""", [veh_id, dr_tok])
         ok(429 in codes, f"server answers 429 on rapid pings (got {codes})")
 
+        # driver app's own 429 message: the server (stubbed here) refuses a ping
+        drv.route("**/pings", lambda r: r.fulfill(status=429, body="{}"))
+        time.sleep(5.2)  # past the app's 5 s ping throttle
+        dctx.set_geolocation({"latitude": 23.91, "longitude": 90.51})
+        drv.wait_for_function("document.getElementById('status').textContent.includes('Too many requests')", timeout=15000)
+        ok(True, "driver app shows its 429 message when a ping is refused")
+        shot(drv, "driver_360_429.png", "driver app 360x740, English 429 'Too many requests' message")
+        drv.unroute("**/pings")
+
         # 401: bad token
         bctx = b.new_context(viewport={"width": 360, "height": 740})
         bad = page_in(bctx)

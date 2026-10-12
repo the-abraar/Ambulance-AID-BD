@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from .bootstrap import add_user, add_vehicle
-from .db import Conn, IntegrityError, hash_token, migrate, open_db
+from .db import Conn, IntegrityError, hash_token, migrate, open_db, token_expiry
 from .state_machine import INITIAL, TRANSITIONS, InvalidTransition, State, required_role, transition
 
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
@@ -36,7 +36,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         if authorization and authorization.startswith("Bearer "):
             row = db.execute(
                 "SELECT u.id, u.role, d.id AS driver_id FROM users u LEFT JOIN drivers d ON d.user_id=u.id "
-                "WHERE u.token_hash=? AND u.revoked_at IS NULL", (hash_token(authorization[7:]),)).fetchone()
+                "WHERE u.token_hash=? AND u.revoked_at IS NULL AND u.token_expires_at > ?",
+                (hash_token(authorization[7:]), now())).fetchone()
             if row:
                 return dict(row)
         raise HTTPException(401, "invalid or missing bearer token")
@@ -262,11 +263,12 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
             raise HTTPException(404, "no position")
         return {"vehicle_id": vid, **dict(row)}
 
-    def new_token(db: Conn, user_id: str) -> str:
-        tok = secrets.token_urlsafe(32)
-        db.execute("UPDATE users SET token_hash=?, revoked_at=NULL WHERE id=?", (hash_token(tok), user_id))
+    def new_token(db: Conn, user_id: str) -> dict:
+        tok, exp = secrets.token_urlsafe(32), token_expiry()
+        db.execute("UPDATE users SET token_hash=?, revoked_at=NULL, token_expires_at=? WHERE id=?",
+                   (hash_token(tok), exp, user_id))
         db.commit()
-        return tok
+        return {"token": tok, "expires_at": exp}
 
     def driver_user(db: Conn, did: str) -> str:
         row = db.execute("SELECT user_id FROM drivers WHERE id=?", (did,)).fetchone()
@@ -276,11 +278,11 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
 
     @app.post("/me/token/rotate")
     def rotate_own_token(u: dict = Depends(user), db: Conn = Depends(get_db)):
-        return {"token": new_token(db, u["id"])}  # old token stops working at once; new one shown once
+        return new_token(db, u["id"])  # old token stops working at once; new one shown once
 
     @app.post("/drivers/{did}/token/rotate")
     def rotate_driver_token(did: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
-        return {"driver_id": did, "token": new_token(db, driver_user(db, did))}  # also re-enables a revoked driver
+        return {"driver_id": did, **new_token(db, driver_user(db, did))}  # also re-enables a revoked driver
 
     @app.post("/drivers/{did}/token/revoke", status_code=204)
     def revoke_driver_token(did: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):

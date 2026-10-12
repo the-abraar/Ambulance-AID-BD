@@ -8,12 +8,13 @@ import secrets
 import sys
 import uuid
 
-from .db import connect, hash_token
+from .db import connect, hash_token, token_expiry
 
 
 def add_user(db, name: str, role: str) -> tuple[str, str]:
     uid, tok = str(uuid.uuid4()), secrets.token_urlsafe(32)
-    db.execute("INSERT INTO users (id,name,role,token_hash) VALUES (?,?,?,?)", (uid, name, role, hash_token(tok)))
+    db.execute("INSERT INTO users (id,name,role,token_hash,token_expires_at) VALUES (?,?,?,?,?)",
+               (uid, name, role, hash_token(tok), token_expiry()))
     did = None
     if role == "driver":
         did = str(uuid.uuid4())

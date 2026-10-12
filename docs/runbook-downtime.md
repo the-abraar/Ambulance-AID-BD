@@ -17,7 +17,7 @@ Treat the system as down when the console will not load or shows no fresh vehicl
 
 1. Check the host and database are up (`GET /me` with any valid token returns 200).
 2. If the database is unreachable, restore the host first; the app needs no manual step once the database answers (it applies migrations at start).
-3. If a token leaked or a phone was lost: dispatcher revokes it (`POST /drivers/{id}/token/revoke`), and rotates it later for a new device (`POST /drivers/{id}/token/rotate`). The old token stops working immediately.
+3. If a token leaked or a phone was lost: dispatcher revokes it (`POST /drivers/{id}/token/revoke`), and rotates it later for a new device (`POST /drivers/{id}/token/rotate`). The old token stops working immediately. Tokens also expire after 90 days: a driver who gets 401 with no revocation needs a rotated token; an expired dispatcher token needs a new one from `python -m app.bootstrap dispatcher NAME` on the host.
 
 ## After recovery
 

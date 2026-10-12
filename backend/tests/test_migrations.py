@@ -41,3 +41,18 @@ def test_upgrade_0002_to_0003_keeps_users(tmp_path):
     db.commit(); db.close()
     migrate(p)
     assert sqlite3.connect(p).execute("SELECT name,revoked_at FROM users").fetchone() == ("n", None)
+
+
+def test_upgrade_0003_to_0004_backfills_expiry(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    p = str(tmp_path / "x.db")
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parent.parent / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{p}")
+    command.upgrade(cfg, "0003")
+    db = sqlite3.connect(p)
+    db.execute("INSERT INTO users (id,name,role,token_hash) VALUES ('u1','n','driver','h')")
+    db.commit(); db.close()
+    migrate(p)
+    assert sqlite3.connect(p).execute("SELECT token_expires_at FROM users").fetchone()[0] > "2026"

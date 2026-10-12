@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
+from datetime import datetime, timezone
+
 from tests.test_api import env, iso, mk  # noqa: F401
 
 
@@ -57,3 +59,18 @@ def test_concurrent_pings_share_rate_limit(env):
         codes = list(ex.map(lambda a: a.post(f"/vehicles/{env['veh']}/pings", json={"lat": 1, "lng": 2, "ts": iso()},
                                               headers=env["V"]).status_code, apps))
     assert sorted(codes) == [201, 429, 429, 429]
+
+
+def test_token_expiry(env):
+    c, db = env["c"], env["db"]
+    exp = db.execute("SELECT token_expires_at FROM users LIMIT 1").fetchone()[0]
+    days = (datetime.fromisoformat(exp) - datetime.now(timezone.utc)).days
+    assert 88 <= days <= 90  # new tokens live about 90 days
+    db.execute("UPDATE users SET token_expires_at='2000-01-01T00:00:00+00:00'"); db.commit()
+    assert c.get("/me", headers=env["D"]).status_code == 401
+    assert c.get("/me", headers=env["V"]).status_code == 401
+    db.execute("UPDATE users SET token_expires_at='2000-01-01T00:00:00+00:00' WHERE role='driver'")
+    db.execute("UPDATE users SET token_expires_at=? WHERE role='dispatcher'", ("9999-01-01T00:00:00+00:00",)); db.commit()
+    r = c.post(f"/drivers/{env['drv']}/token/rotate", headers=env["D"])  # rotate renews an expired driver
+    assert r.status_code == 200 and r.json()["expires_at"] > "2026"
+    assert c.get("/me", headers=bearer(r.json()["token"])).status_code == 200
