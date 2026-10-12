@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatcher Console</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Dispatcher Console</h1>
+  <form id="login">
+    <input id="token" type="password" placeholder="Dispatcher token" autocomplete="off" aria-label="Dispatcher token">
+    <button>Connect</button>
+    <span id="who"></span>
+  </form>
+</header>
+<main>
+  <section>
+    <h2>New mission</h2>
+    <form id="newm">
+      <label>Pickup lat <input name="lat" type="number" step="any" min="-90" max="90" required></label>
+      <label>Pickup lng <input name="lng" type="number" step="any" min="-180" max="180" required></label>
+      <label>Address (optional) <input name="addr"></label>
+      <label>Vehicle <select name="veh"></select></label>
+      <label>Driver <select name="drv"></select></label>
+      <button>Create</button>
+    </form>
+  </section>
+  <section>
+    <h2>Missions
+      <select id="filter" aria-label="Status filter"><option value="">All</option></select>
+    </h2>
+    <table id="missions"><thead><tr><th>ID</th><th>Status</th><th>Pickup</th><th>Vehicle</th><th>Driver</th><th>Updated</th><th>Actions</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Vehicles</h2>
+    <form id="newv"><input name="operator" placeholder="Operator" required><input name="registration" placeholder="Registration" required><button>Add vehicle</button></form>
+    <table id="vehicles"><thead><tr><th>Registration</th><th>Operator</th><th>Active</th><th>Last ping</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Drivers</h2>
+    <form id="newd"><input name="name" placeholder="Driver name" required><button>Add driver</button></form>
+    <p id="newtok" hidden></p>
+    <table id="drivers"><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+<aside id="drawer" hidden>
+  <button id="close" aria-label="Close">x</button>
+  <h2>Audit trail</h2>
+  <ol id="audit"></ol>
+</aside>
+<div id="toasts" role="alert" aria-live="assertive"></div>
+<script src="app.js"></script>
+</body>
+</html>

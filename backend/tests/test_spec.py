@@ -1,0 +1,51 @@
+from pathlib import Path
+
+import pytest
+import yaml
+from jsonschema import Draft202012Validator, FormatChecker
+
+from tests.test_api import env, mk  # noqa: F401
+
+SPEC = yaml.safe_load((Path(__file__).resolve().parents[2] / "docs/api-spec/openapi.yaml").read_text())
+
+
+def check(name, body):
+    v = Draft202012Validator({"$ref": f"#/components/schemas/{name}", "components": SPEC["components"]},
+                             format_checker=FormatChecker())
+    errs = list(v.iter_errors(body))
+    assert not errs, errs
+
+
+def test_responses_match_spec(env):  # noqa: F811
+    c = env["c"]
+    m = mk(env)
+    check("Mission", c.get(f"/missions/{m}", headers=env["D"]).json())
+    check("Mission", c.patch(f"/missions/{m}/status", json={"status": "EN_ROUTE_PICKUP"}, headers=env["V"]).json())
+    for x in c.get("/missions", headers=env["D"]).json():
+        check("Mission", x)
+    bare = c.post("/missions", json={"pickup_address": "x"}, headers=env["D"])
+    check("Mission", bare.json())  # null vehicle/driver must be allowed
+    assert bare.json()["pickup_lat"] is None
+    withc = c.post("/missions", json={"pickup_address": "x", "pickup_lat": 1.5, "pickup_lng": 2.5}, headers=env["D"])
+    check("Mission", withc.json())
+    check("MissionCreateRequest", {"pickup_address": "x", "pickup_lat": 1.5, "pickup_lng": 2.5})
+    with pytest.raises(AssertionError):
+        check("MissionCreateRequest", {"pickup_address": "x", "pickup_lat": 100, "pickup_lng": 2.5})
+    from tests.test_api import iso
+    c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 1, "lng": 2, "ts": iso()}, headers=env["V"])
+    check("VehiclePosition", c.get(f"/vehicles/{env['veh']}/position", headers=env["D"]).json())
+    for v in c.get("/vehicles", headers=env["D"]).json():
+        check("VehicleSummary", v)
+    check("VehicleSummary", c.post("/vehicles", json={"operator": "o", "registration": "R-1"}, headers=env["D"]).json())
+    for d in c.get("/drivers", headers=env["D"]).json():
+        check("DriverSummary", d)
+    check("DriverCreated", c.post("/drivers", json={"name": "n"}, headers=env["D"]).json())
+    check("Mission", c.get("/missions/current", headers=env["V"]).json())
+    check("Me", c.get("/me", headers=env["D"]).json())
+    check("Me", c.get("/me", headers=env["V"]).json())
+    for a in c.get(f"/missions/{m}/audit", headers=env["D"]).json():
+        check("AuditEntry", a)
+    check("Transitions", c.get("/meta/transitions", headers=env["D"]).json())
+    # the schema must actually bite
+    with pytest.raises(AssertionError):
+        check("Mission", {"id": m, "status": "DISPATCHED"})

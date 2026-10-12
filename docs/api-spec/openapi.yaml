@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Ambulance-AID-BD API
   description: >
@@ -14,6 +14,8 @@ servers:
     description: Production National Gateway
   - url: https://staging.ambulance-aid.gov.bd/v1
     description: Staging / Sandbox Environment
+  - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
+    description: INTERNAL ONLY. Private network/VPN link to the TMC. Not internet-facing. Serves the Internal-Preemption tag only.
 
 paths:
   /telemetry/ingest:
@@ -38,6 +40,20 @@ paths:
           description: Unauthorized vehicle certificate.
 
   /missions:
+    get:
+      summary: List missions, optionally by status (dispatcher only)
+      operationId: listMissions
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: status, in: query, required: false, schema: {$ref: '#/components/schemas/MissionStatus'}}
+      responses:
+        '200':
+          description: Missions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Mission'}
     post:
       summary: Create emergency dispatch mission
       description: Initiated by 999 dispatchers or validated citizen emergency app bookings.
@@ -58,17 +74,139 @@ paths:
               schema:
                 $ref: '#/components/schemas/Mission'
 
+  /me:
+    get:
+      summary: Identity of the bearer token
+      operationId: getMe
+      security: [{BearerAuth: []}]
+      responses:
+        '200': {description: Caller., content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+  /missions/current:
+    get:
+      summary: The calling driver's single non-terminal mission (driver only)
+      operationId: getCurrentMission
+      security: [{BearerAuth: []}]
+      responses:
+        '200': {description: Mission., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '403': {description: Not a driver.}
+        '404': {description: No active mission.}
+  /meta/transitions:
+    get:
+      summary: Allowed next mission states per state, filtered to what the caller's role may perform (drivers advance, dispatchers cancel)
+      operationId: getTransitions
+      security: [{BearerAuth: []}]
+      responses:
+        '200': {description: Map., content: {application/json: {schema: {$ref: '#/components/schemas/Transitions'}}}}
+  /vehicles:
+    get:
+      summary: List vehicles with last ping (dispatcher only)
+      operationId: listVehicles
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: Vehicles.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/VehicleSummary'}}}}
+        '403': {description: Not a dispatcher.}
+    post:
+      summary: Register a vehicle (dispatcher only)
+      operationId: createVehicle
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [operator, registration], properties: {operator: {type: string, minLength: 1}, registration: {type: string, minLength: 1}}}
+      responses:
+        '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/VehicleSummary'}}}}
+        '409': {description: Registration exists.}
+  /drivers:
+    get:
+      summary: List drivers (dispatcher only)
+      operationId: listDrivers
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: Drivers.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DriverSummary'}}}}
+    post:
+      summary: Register a driver; the bearer token is returned once (dispatcher only)
+      operationId: createDriver
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [name], properties: {name: {type: string, minLength: 1}}}
+      responses:
+        '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/DriverCreated'}}}}
+  /missions/{missionId}/audit:
+    get:
+      summary: Status-change audit trail (dispatcher only)
+      operationId: getMissionAudit
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Entries, oldest first.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuditEntry'}}}}
+        '404': {description: Unknown mission.}
+
+  /vehicles/{vehicleId}/pings:
+    post:
+      summary: Driver GPS ping (MVP; /telemetry/ingest is not implemented)
+      description: Only the driver assigned to an active mission using this vehicle. Timestamp must be within 300 s past / 60 s future. 429 if pinged faster than once per second.
+      operationId: postPing
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: vehicleId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lat, lng, ts]
+              properties:
+                lat: {type: number, minimum: -90, maximum: 90}
+                lng: {type: number, minimum: -180, maximum: 180}
+                ts: {type: string, format: date-time}
+      responses:
+        '201': {description: Stored.}
+        '403': {description: Not the assigned driver/vehicle.}
+        '422': {description: Invalid or out-of-window ts.}
+        '429': {description: Rate limited.}
+
+  /vehicles/{vehicleId}/position:
+    get:
+      summary: Latest ping for a vehicle (dispatcher only)
+      operationId: getVehiclePosition
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: vehicleId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Latest position.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePosition'
+        '404': {description: No ping yet.}
+
   /missions/{missionId}/status:
     patch:
       summary: Update mission lifecycle status
-      description: Toggled by the driver CAD tablet or hospital check-in.
+      description: Toggled only by the device of the driver assigned to this mission (token subject must match the assigned vehicle/driver), or by hospital check-in. Other callers get 403.
       operationId: updateMissionStatus
+      security:
+        - BearerAuth: []
       parameters:
         - name: missionId
           in: path
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -88,6 +226,10 @@ paths:
       summary: Send emergency signal preemption command to Traffic Management Center (TMC)
       description: Sent by the Corridor Engine when an active mission reaches the ETA threshold of an intersection.
       operationId: triggerPreemption
+      tags: [Internal-Preemption]
+      servers:
+        - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
+          description: Internal only, private network/VPN. Not internet-facing.
       security:
         - BearerAuth: []
       requestBody:
@@ -111,6 +253,10 @@ paths:
       summary: Release signal preemption hold
       description: Sent immediately after the ambulance clears the intersection or times out.
       operationId: releasePreemption
+      tags: [Internal-Preemption]
+      servers:
+        - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
+          description: Internal only, private network/VPN. Not internet-facing.
       security:
         - BearerAuth: []
       requestBody:
@@ -170,9 +316,8 @@ components:
       scheme: bearer
       bearerFormat: JWT
     MutualTLS:
-      type: apiKey
-      name: X-Client-Cert-SHA256
-      in: header
+      type: mutualTLS
+      description: Client certificate verified at the TLS layer (OpenAPI 3.1). Identity is never taken from a request header.
 
   schemas:
     TelemetryPing:
@@ -213,38 +358,35 @@ components:
           example: true
         active_mission_id:
           type: string
+          format: uuid
           nullable: true
-          example: "MSN-20261012-9841"
+          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
 
     MissionCreateRequest:
+      description: MVP shape implemented in backend/. Caller phone, coordinates, tier and hospital are not yet implemented.
       type: object
-      required:
-        - caller_phone
-        - pickup_latitude
-        - pickup_longitude
-        - required_tier
+      required: [pickup_address]
       properties:
-        caller_phone:
+        pickup_address:
           type: string
-          example: "+8801711000000"
-        pickup_latitude:
-          type: number
-          format: double
-          example: 23.805
-        pickup_longitude:
-          type: number
-          format: double
-          example: 90.368
-        destination_hospital_id:
-          type: string
-          example: "HOSP-DMCH-01"
-        required_tier:
-          type: string
-          enum: [BLS, ALS, ICU, NICU]
-          example: "ICU"
-        emergency_category:
-          type: string
-          example: "CARDIAC_ARREST"
+          minLength: 1
+        assigned_vehicle_id:
+          type: [string, "null"]
+        assigned_driver_id:
+          type: [string, "null"]
+        pickup_lat:
+          type: [number, "null"]
+          minimum: -90
+          maximum: 90
+          description: Must be sent together with pickup_lng.
+        pickup_lng:
+          type: [number, "null"]
+          minimum: -180
+          maximum: 180
+
+    MissionStatus:
+      type: string
+      enum: [DISPATCHED, EN_ROUTE_PICKUP, AT_SCENE, TRANSPORTING_PATIENT, AT_HOSPITAL, COMPLETED, CANCELLED]
 
     MissionStatusUpdate:
       type: object
@@ -252,41 +394,99 @@ components:
         - status
       properties:
         status:
-          type: string
-          enum:
-            - DISPATCHED
-            - EN_ROUTE_PICKUP
-            - AT_SCENE
-            - TRANSPORTING_PATIENT
-            - AT_HOSPITAL
-            - COMPLETED
-            - CANCELLED
-          example: "TRANSPORTING_PATIENT"
+          $ref: '#/components/schemas/MissionStatus'
         notes:
           type: string
           example: "Patient vitals stabilized, oxygen on at 10L/min"
 
     Mission:
       type: object
+      additionalProperties: false
+      required: [mission_id, status, pickup_address, pickup_lat, pickup_lng, assigned_vehicle_id, assigned_driver_id, created_at, updated_at]
       properties:
         mission_id:
           type: string
-          example: "MSN-20261012-9841"
+          format: uuid
+          description: Non-guessable random identifier (UUIDv7/v4 or ULID). Never sequential or date-based.
+          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
         status:
-          type: string
-          example: "TRANSPORTING_PATIENT"
+          $ref: '#/components/schemas/MissionStatus'
         assigned_vehicle_id:
-          type: string
+          type: [string, "null"]
           example: "AMB-DHK-CH-71-4921"
+        assigned_driver_id:
+          type: [string, "null"]
         pickup_address:
           type: string
           example: "House 12, Road 4, Mirpur-10, Dhaka"
-        destination_hospital:
-          type: string
-          example: "National Institute of Cardiovascular Diseases (NICVD)"
+        pickup_lat: {type: [number, "null"], minimum: -90, maximum: 90}
+        pickup_lng: {type: [number, "null"], minimum: -180, maximum: 180}
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Me:
+      type: object
+      additionalProperties: false
+      required: [role, user_id]
+      properties:
+        role: {type: string, enum: [dispatcher, driver]}
+        user_id: {type: string}
+        driver_id: {type: string}
+        vehicle_id: {type: [string, "null"]}
+
+    Transitions:
+      type: object
+      additionalProperties: {type: array, items: {$ref: '#/components/schemas/MissionStatus'}}
+
+    VehicleSummary:
+      type: object
+      additionalProperties: false
+      required: [vehicle_id, operator, registration, active, last_ping]
+      properties:
+        vehicle_id: {type: string}
+        operator: {type: string}
+        registration: {type: string}
+        active: {type: boolean}
+        last_ping:
+          type: [object, "null"]
+          required: [lat, lng, ts]
+          properties: {lat: {type: number}, lng: {type: number}, ts: {type: string, format: date-time}}
+
+    DriverSummary:
+      type: object
+      additionalProperties: false
+      required: [driver_id, name]
+      properties: {driver_id: {type: string}, name: {type: string}}
+
+    DriverCreated:
+      type: object
+      additionalProperties: false
+      required: [driver_id, name, token]
+      properties: {driver_id: {type: string}, name: {type: string}, token: {type: string, description: Shown once.}}
+
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required: [user_id, from_status, to_status, ts]
+      properties:
+        user_id: {type: string}
+        from_status: {type: [string, "null"]}
+        to_status: {$ref: '#/components/schemas/MissionStatus'}
+        ts: {type: string, format: date-time}
+
+    VehiclePosition:
+      type: object
+      additionalProperties: false
+      required: [vehicle_id, lat, lng, ts]
+      properties:
+        vehicle_id: {type: string}
+        lat: {type: number}
+        lng: {type: number}
+        ts: {type: string, format: date-time}
 
     PreemptionTriggerRequest:
       type: object
@@ -296,13 +496,20 @@ components:
         - target_approach
         - estimated_arrival_seconds
         - max_hold_seconds
+        - lease_token
       properties:
+        lease_token:
+          type: string
+          description: Short-lived JWT signed with Ed25519 (alg EdDSA) by the corridor engine. The controller verifies it before acting.
+          example: "eyJhbGciOiJFZERTQSIs..."
         junction_id:
           type: string
           example: "DHK_MIRPUR_10_01"
         mission_id:
           type: string
-          example: "MSN-20261012-9841"
+          format: uuid
+          description: Non-guessable random identifier (UUIDv7/v4 or ULID). Never sequential or date-based.
+          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
         target_approach:
           type: string
           example: "NORTH_TO_SOUTH"

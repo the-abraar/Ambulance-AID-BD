@@ -1,5 +1,7 @@
 # System Overview & Architecture
 
+> **FUTURE / CONCEPT ONLY.** Nothing in this document is built, agreed with any authority, or field-tested. Signal control requires prerequisites in [roadmap.md](../roadmap.md). Numbers and timings here are unsourced estimates unless cited; timing parameters conflict across docs and must be set by a licensed traffic engineer. Current mission states are in [dispatch-and-citizen-platform.md](dispatch-and-citizen-platform.md) section 4. Sections 3.2 to 3.4 describe a hypothetical full system; the wedge MVP covers only a small part of 3.1 and 3.4 for one operator.
+
 ## 1. Vision & Purpose
 
 **Ambulance-AID-BD** connects three historically isolated components of urban infrastructure in Bangladesh:
@@ -7,7 +9,7 @@
 2. **Municipal Traffic Signals** (Intelligent Transportation Systems / Traffic Management Centers).
 3. **Emergency Dispatch & Citizen Platforms** (National 999 CAD and public booking interfaces).
 
-By synchronizing real-time telematics with digital traffic controllers, the platform creates an automated **"Green Corridor"** for emergency vehicles while providing complete visibility of available life-saving ambulances nationwide.
+By synchronizing real-time telematics with digital traffic controllers, the platform creates an automated **"Green Corridor"** for emergency vehicles while aiming (FUTURE) at visibility of available ambulances beyond a single fleet.
 
 ---
 
@@ -27,13 +29,13 @@ sequenceDiagram
     Caller->>CAD: Emergency Call / App Booking (Cardiac Arrest at Mirpur-10)
     CAD->>CAD: Algorithm selects nearest qualified unit (ICU Ambulance)
     CAD->>Amb: Dispatches Mission & Waypoints
-    Amb->>CAD: Mission Accepted (Status: DISPATCHED)
+    Amb->>CAD: Mission Accepted (Status: EN_ROUTE_PICKUP)
     
     loop Real-time Telemetry (Every 1s)
         Amb->>Cloud: MQTT Stream: Lat/Lng, Heading, Speed, Mission_ID, Siren_Active
     end
 
-    Amb->>CAD: Patient Picked Up (Status: PATIENT_ONBOARD, Dest: NICVD)
+    Amb->>CAD: Patient Picked Up (Status: TRANSPORTING_PATIENT, Dest: NICVD)
     CAD->>Hosp: Patient incoming, ETA: 14 mins, Live Telemetry
     
     loop Predictive Preemption Ahead of Ambulance
@@ -48,7 +50,7 @@ sequenceDiagram
     end
 
     Amb->>Hosp: Arrives at Trauma Bay
-    Amb->>CAD: Mission Complete (Status: AVAILABLE)
+    Amb->>CAD: Mission Complete (Status: COMPLETED)
 ```
 
 ---
@@ -63,7 +65,7 @@ sequenceDiagram
   * Optional patient vitals bridge (Bluetooth/Wi-Fi connection to portable defibrillators/monitors).
 * **Driver Terminal:** A ruggedized in-cabin Android tablet running the **CAD Driver Application**:
   * Displays turn-by-turn navigation optimized for emergency green corridors.
-  * One-touch mission status toggles: `En Route to Scene`, `At Scene`, `Transporting Patient`, `At Hospital`, `Clear / Available`.
+  * One-touch mission status toggles: `En Route`, `At Scene`, `Transporting Patient`, `At Hospital`, `Completed` (maps to the states in `backend/app/state_machine.py`).
 
 ### 3.2 Cloud Orchestration & Corridor Engine
 * **Ingestion Gateway:** High-throughput MQTT brokers (EMQX or VerneMQ) terminating TLS connections with mutual authentication (mTLS).
@@ -79,8 +81,8 @@ sequenceDiagram
   * **SCATS (Sydney Coordinated Adaptive Traffic System) / SCOOT** integration APIs.
   * **Custom REST/WebSocket/MQTT edge connectors** for proprietary or industrial PLC controllers deployed by local city corporations.
 * **Failsafe Mechanisms:**
-  * Preemption commands have strict lease times (maximum hold of 60–90 seconds) with automatic timeout rollback.
-  * Minimum safety clearance: yellow time ($\ge 3$s), all-red interval ($\ge 2$s), and pedestrian clearance timers are mathematically locked in hardware to prevent instant switching.
+  * Preemption commands have strict lease times (maximum hold UNDECIDED; 60 to 90 s appear in different docs) with automatic timeout rollback.
+  * Minimum safety clearance: yellow and all-red minimums (values UNDECIDED; to be set by a licensed traffic engineer), and pedestrian clearance timers are mathematically locked in hardware to prevent instant switching.
 
 ### 3.4 National Computer-Aided Dispatch (CAD) & Citizen App
 * **Operator Console:** Web-based operational dashboard for 999 emergency call-takers and dispatchers:
@@ -96,7 +98,7 @@ sequenceDiagram
 
 ## 4. Key Performance Indicators (KPIs)
 
-| Metric | Current Baseline (Dhaka Urban) | Ambulance-AID-BD Target |
+| Metric | Baseline (UNSOURCED estimate, not measured) | Target (hypothesis, not a commitment) |
 | :--- | :--- | :--- |
 | **Average Response Time (Dispatch to Scene)** | 35 – 55 minutes | $\le 15$ minutes |
 | **Hospital Transit Time during Peak Hours** | 45 – 80 minutes | $\le 20$ minutes |

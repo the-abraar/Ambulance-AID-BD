@@ -1,5 +1,7 @@
 # Emergency Vehicle Preemption (EVP) Technical Specification
 
+> **FUTURE / CONCEPT ONLY.** Nothing in this document is built, agreed with any authority, or field-tested. Signal control requires prerequisites in [roadmap.md](../roadmap.md). Numbers and timings here are unsourced estimates unless cited; timing parameters conflict across docs and must be set by a licensed traffic engineer. Current mission states are in [dispatch-and-citizen-platform.md](dispatch-and-citizen-platform.md) section 4. The sample JWT here is illustrative only.
+
 ## 1. Preemption vs. Priority (TSP vs. EVP)
 
 In Intelligent Transportation Systems (ITS), transit adjustments fall into two categories:
@@ -14,13 +16,13 @@ In Intelligent Transportation Systems (ITS), transit adjustments fall into two c
 
 | Feature | Hardware Edge (e.g. 3M Opticom / C-V2X) | Cloud-to-TMC (Ambulance-AID-BD) |
 | :--- | :--- | :--- |
-| **Poleside Equipment** | Optical detector / DSRC radio on every pole | None (uses existing controller network link) |
+| **Poleside Equipment** | Optical detector / DSRC radio on every pole | Assumed none IF controllers are networked and controllable (UNVERIFIED); `bangladesh-context-and-challenges.md` section 3 lists UPS and dual-SIM gateways, so this is not zero |
 | **In-Vehicle Cost** | \$2,500 – \$5,000 per ambulance | \$150 – \$300 (standard cellular IoT tracker) |
-| **Capital Cost for Dhaka** | Hundreds of millions of BDT for 1,000+ poles | Minimal (centralized cloud software API) |
+| **Capital Cost for Dhaka** | UNKNOWN (no sourced figure) | UNKNOWN (not "minimal"; depends on controller access and site hardware) |
 | **Detection Range** | Line of sight (300–400m) | Unlimited (predictive over kilometers) |
 | **Queue Flushing Ahead** | Poor (detects vehicle when it's already stuck) | **Excellent** (triggers green 2–4 mins early) |
 
-**Conclusion:** For Bangladesh, **Centralized Cloud-to-TMC preemption** is not only orders of magnitude more affordable, but technically superior for handling high-density gridlock.
+**Conclusion (hypothesis, unvalidated):** cloud-to-TMC may be cheaper and better suited to gridlock, but only if target junctions are networked and controllable. That is UNVERIFIED. Cost and in-vehicle figures above are unsourced.
 
 ---
 
@@ -69,13 +71,13 @@ For modern microcontrollers, Linux edge gateways, or SCATS systems installed at 
   "junction_id": "DHK_MIRPUR_10_01",
   "timestamp": "2026-10-12T14:15:30.125Z",
   "command": "TRIGGER_PREEMPTION",
-  "mission_id": "MSN-20261012-9841",
+  "mission_id": "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61",
   "priority": "HIGH",
   "target_phase": 2,
   "approach_direction": "NORTH_TO_SOUTH",
   "estimated_arrival_utc": "2026-10-12T14:17:15.000Z",
   "max_hold_seconds": 90,
-  "lease_token": "eyJhbGciOiJFUzI1NiIs..."
+  "lease_token": "eyJhbGciOiJFZERTQSIs..."
 }
 ```
 

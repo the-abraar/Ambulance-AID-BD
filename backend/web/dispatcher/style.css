@@ -1,0 +1,18 @@
+body{font:14px system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1b1f24}
+header{display:flex;gap:1rem;align-items:center;padding:.6rem 1rem;background:#8b1a1a;color:#fff;flex-wrap:wrap}
+h1{font-size:1.1rem;margin:0}h2{font-size:1rem}
+main{padding:1rem;display:grid;gap:1rem}
+section{background:#fff;padding:.8rem 1rem;border-radius:6px;overflow-x:auto}
+form{display:flex;gap:.5rem;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;font-size:12px}
+input,select,button{padding:.35rem .5rem;font:inherit}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:.3rem .5rem;border-bottom:1px solid #e3e5e8}
+td button{margin-right:.3rem}
+.stale{background:#fde2e2;color:#8b1a1a;font-weight:600}
+.fresh{color:#176b2c}
+code{font-size:12px}
+#drawer{position:fixed;top:0;right:0;width:min(380px,100%);height:100%;background:#fff;box-shadow:-2px 0 8px #0003;padding:1rem;overflow:auto}
+#toasts{position:fixed;bottom:1rem;left:1rem;display:grid;gap:.4rem;z-index:10}
+.toast{background:#8b1a1a;color:#fff;padding:.5rem .8rem;border-radius:4px;max-width:420px}
+#newtok{background:#fff6d6;padding:.5rem;word-break:break-all}

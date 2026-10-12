@@ -1,0 +1,7 @@
+# Default rule set. E401/E70x/E731 are one-line style in existing code (not reformatted);
+# F811 in tests is the pytest fixture-import pattern.
+[lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E401", "E701", "E702", "E731"]
+[lint.per-file-ignores]
+"backend/tests/*" = ["F811"]

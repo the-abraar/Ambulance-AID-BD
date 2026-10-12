@@ -1,84 +1,45 @@
-# Implementation Roadmap for Bangladesh
+# Roadmap (gated, not dated)
 
-A successful rollout of **Ambulance-AID-BD** requires a phased approach that starts with high-impact software telematics and controlled corridor pilots before scaling to national municipal infrastructure.
+No calendar dates are promised. Each phase starts only when the previous phase's exit criteria and the named gates are met. The earlier 24-month plan (200 government vehicles from 2026-11, TMC integration, 2,500 private ambulances) was removed: it assumed procurement, funding, MoUs and signal access that do not exist.
 
----
+## Where we are
+Built: tested backend (mission state machine, mission API, GPS pings, per-user auth, audit log, migrations). Not built or done: driver app, dispatcher console, deployment, any partner, any government engagement, any field test, any signal integration.
 
-```mermaid
-gantt
-    title Ambulance-AID-BD 24-Month Rollout Roadmap
-    dateFormat  YYYY-MM
-    section Phase 1: Telematics & CAD
-    Equip 200 Public Ambulances with GPS/Sensors    :2026-11, 4m
-    Deploy Cloud CAD Engine & 999 Integration       :2026-12, 5m
-    Driver Terminal Tablet App Beta Rollout         :2027-02, 3m
-    section Phase 2: Corridor Pilot
-    Select Pilot Corridor (Airport-Mohakhali-DMCH)  :2027-04, 2m
-    Integrate TMC API with Automated Signals        :2027-05, 4m
-    Field EVP Testing & Safety Metric Evaluation    :2027-07, 3m
-    section Phase 3: Scale & Citizen App
-    BRTA Regulatory Policy for Private Fleets       :2027-09, 6m
-    Citizen Emergency Booking App & Web Launch      :2027-10, 4m
-    Expand to Chattogram, Sylhet & Rajshahi         :2028-02, 6m
-```
+## Phase 0: Discovery (CURRENT, in parallel with the backend)
+- 20+ interviews (ambulance owners/drivers, 2-3 hospital fleet managers, a 999 supervisor, DMP Traffic). Count so far: 0.
+- One signed pilot LOI with one fleet operator (none yet).
+- Confirm state machine choices with a real dispatcher.
+- Local legal opinion on data protection. Status of Bangladesh data law: UNVERIFIED.
+- Exit: a signed pilot partner.
 
----
+## Phase 1: Wedge MVP and pilot (NEXT)
+One operator, fewer than 20 vehicles, dispatch plus visibility only, no signals. Scope in [mvp-wedge.md](mvp-wedge.md), plan and success criteria in [pilot-plan.md](pilot-plan.md).
+- Remaining build: driver Android app, dispatcher console, Postgres/PostGIS, deployment, CI actually run, backup/restore drill, offline/phone fallback.
+- Output: a measured baseline dataset (response times, utilisation) from the pilot.
+- Exit: pilot success criteria met; data-protection and ops basics in place.
 
-## Phase 1: Fleet Telematics & Centralized CAD (Months 1 – 6)
+## Phase 2: More fleets (FUTURE, gated)
+Gate: Phase 1 exit criteria met. Add a small number of further fleets. Test willingness to pay (pricing UNKNOWN).
 
-### Objective
-Establish total digital visibility of government and major hospital emergency fleets without modifying physical traffic signals yet.
+## FUTURE products (not scheduled)
 
-### Deliverables
-1. **Hardware Outfitting:**
-   * Install automotive-grade 4G IoT telematics units on **200 public emergency vehicles**:
-     * Bangladesh Fire Service & Civil Defence ambulances.
-     * Government tertiary hospital fleets (DMCH, BSMMU, NICVD, NITOR, Suhrawardy).
-     * Anjuman Mufidul Islam charitable ambulances.
-   * Wire current sensors to emergency siren/lightbar switches.
-2. **Software Platform:**
-   * Deploy the centralized CAD ingestion gateway and spatial database.
-   * Roll out the **Driver Terminal Application** on ruggedized dashboard tablets.
-   * Provide a web-based dispatch console for the **National Emergency Service 999** operators.
-3. **Data Collection:**
-   * Benchmark baseline trip durations, typical junction wait times, and routing bottlenecks during morning and evening rush hours.
+### A. Signal preemption (EVP)
+Gate, all required:
+1. Written agreement with the authority that owns the target junctions (UNKNOWN which body).
+2. Site survey on one corridor: per junction, owner, controller make and firmware, network link, current mode (manual, fixed-time, actuated). Target signals verified API-controllable. UNVERIFIED today.
+3. Traffic simulation and a safety case signed by a licensed traffic engineer. Timing parameters are inconsistent across docs and must be set by that engineer.
+4. Bench test on a real controller, then external security review.
+5. Pilot, if ever, is one junction, off-peak, police present.
+Fallback if signals are manual: police-assisted corridor alerts.
 
----
+### B. National 999 / CAD integration
+Gate: written agreement with the 999 operating body, data-sharing basis, pilot data as evidence.
 
-## Phase 2: Single-Corridor Dynamic Preemption Pilot (Months 7 – 12)
+### C. Citizen booking marketplace
+Gate: proven dispatch pilot, payments and consent design, fare rules verified, anti-fraud design. No preemption rights.
 
-### Objective
-Integrate the cloud engine with newly automated traffic signal controllers along a critical emergency medical artery in Dhaka to validate the Green Wave algorithm.
+### D. Regulatory mandates (telematics tied to licences), multi-city expansion
+No mandate exists or is assumed. Depends on regulators' own decisions; nothing here is planned on their behalf.
 
-### Target Pilot Corridor
-* **Corridor Selection:** **Mirpur Road ➔ Science Lab ➔ Shahbagh ➔ DMCH / BSMMU** (or alternatively **Airport Road ➔ Mohakhali ➔ Tejgaon**).
-* Total Intersections: ~8–12 automated signal junctions.
-
-### Deliverables
-1. **Signal Controller Interface:**
-   * Deploy secure edge gateway connectors linking the municipal Traffic Management Center (TMC) and the Corridor Engine.
-   * Configure controller firmware to enforce fail-safe clearance intervals (minimum yellow and all-red buffers).
-2. **Controlled Field Trials:**
-   * Execute staged emergency runs under peak and off-peak traffic conditions.
-   * Test anticipatory queue flushing (triggering preemption 2–3 minutes before arrival).
-   * Evaluate cross-traffic delay impact to ensure preemption does not collapse surrounding street grids.
-3. **Empirical Assessment:**
-   * Target: $\ge 40\%$ reduction in emergency transit duration through the corridor.
-
----
-
-## Phase 3: Public Citizen Platform & Nationwide Expansion (Months 13 – 24)
-
-### Objective
-Onboard private ambulance fleets, launch the public-facing booking portal, and scale to other major urban centers.
-
-### Deliverables
-1. **Public Emergency Portal & Mobile App:**
-   * Launch native iOS, Android, and progressive web apps for citizens.
-   * Real-time map displaying nearest available BLS, ALS, and ICU units with verified pricing.
-   * 999 dispatch operator direct push-to-app workflow.
-2. **Regulatory Mandate & Private Fleet Onboarding:**
-   * Collaborate with the Ministry of Road Transport and Bridges (BRTA) and the Directorate General of Health Services (DGHS) to mandate telematics compliance for private ambulance operating licenses.
-   * Onboard over 2,500 private, clinic, and NGO ambulances across Dhaka.
-3. **Multi-City Rollout:**
-   * Extend signal preemption and CAD infrastructure to Chattogram (Agrabad ➔ CMCH corridor), Sylhet, Rajshahi, and Khulna.
+## Targets
+Earlier targets (e.g. a 40% transit-time reduction) were hypotheses with no baseline. They are dropped until the pilot produces measured data.

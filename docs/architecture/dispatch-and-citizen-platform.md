@@ -1,5 +1,7 @@
 # Computer-Aided Dispatch (CAD) & Citizen Platform
 
+> **FUTURE / CONCEPT ONLY.** Nothing in this document is built, agreed with any authority, or field-tested. Signal control requires prerequisites in [roadmap.md](../roadmap.md). Numbers and timings here are unsourced estimates unless cited; timing parameters conflict across docs and must be set by a licensed traffic engineer. Current mission states are in [dispatch-and-citizen-platform.md](this file) section 4 (below). The mission state machine in section 4 is the one part that is built (backend only).
+
 ## 1. The Fragmentation Problem in Bangladesh
 
 Today, ambulance dispatch in Bangladesh is decentralized and inefficient:
@@ -50,7 +52,7 @@ flowchart LR
 
 ## 3. Vehicle Classification Standards
 
-Every registered ambulance is certified under one of five tiers according to DGHS (Directorate General of Health Services) standards:
+Every registered ambulance is certified under one of five tiers per a five-tier scheme attributed to DGHS (Directorate General of Health Services). UNVERIFIED: no citation has been checked; treat the tiers as a working classification:
 
 1. **Tier 1: Basic Life Support (BLS)**
    * Stretcher, portable oxygen cylinder, basic first-aid kit, automated external defibrillator (AED).
@@ -67,23 +69,35 @@ Every registered ambulance is certified under one of five tiers according to DGH
 
 ## 4. Emergency Mission State Machine
 
-To balance rapid dispatch with anti-abuse security, each ambulance operates on a strict finite state machine:
+**Single source of truth: `backend/app/state_machine.py`.** All other docs defer to this list.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AVAILABLE: Shift Start & System Login
-    AVAILABLE --> DISPATCHED: 999 or App Emergency Booking
-    DISPATCHED --> EN_ROUTE_PICKUP: Driver Acknowledges Mission
-    EN_ROUTE_PICKUP --> AT_SCENE: Reaches Patient Location
-    AT_SCENE --> TRANSPORTING_PATIENT: Patient Loaded & Destination Set
-    TRANSPORTING_PATIENT --> AT_HOSPITAL: Arrival at Emergency Dept
-    AT_HOSPITAL --> DECONTAMINATION: Patient Transferred to ER
-    DECONTAMINATION --> AVAILABLE: Restocked & Ready
+    [*] --> DISPATCHED: Mission created by dispatcher
+    DISPATCHED --> EN_ROUTE_PICKUP: Driver acknowledges
+    EN_ROUTE_PICKUP --> AT_SCENE: Reaches patient location
+    AT_SCENE --> TRANSPORTING_PATIENT: Patient loaded
+    TRANSPORTING_PATIENT --> AT_HOSPITAL: Arrival at emergency dept
+    AT_HOSPITAL --> COMPLETED: Handover done
+    DISPATCHED --> CANCELLED
+    EN_ROUTE_PICKUP --> CANCELLED
+    AT_SCENE --> CANCELLED
 ```
 
-* **Preemption Activation:**
-  * Signal preemption privileges are **strictly locked** to `EN_ROUTE_PICKUP` and `TRANSPORTING_PATIENT` states.
-  * In `AVAILABLE`, `AT_SCENE`, `DECONTAMINATION`, or off-duty states, preemption requests are ignored by the Traffic Management Center.
+Mission states: `DISPATCHED`, `EN_ROUTE_PICKUP`, `AT_SCENE`, `TRANSPORTING_PATIENT`, `AT_HOSPITAL`, `COMPLETED`, `CANCELLED`. `COMPLETED` and `CANCELLED` are terminal. Created missions start in `DISPATCHED`. CANCELLED rules and the initial state are developer choices pending confirmation with a real dispatcher. Only the dispatcher creates or cancels; only the assigned driver advances.
+
+**Vehicle availability is separate from mission state (FUTURE, not built).** The earlier diagram mixed in vehicle states `AVAILABLE` and `DECONTAMINATION` (restock/clean after handover). These belong to a future vehicle-status model, not the mission state list.
+
+**Old names mapped (other docs used these):**
+
+| Old name | Current |
+| :--- | :--- |
+| `DISPATCHED_TO_PATIENT` | `DISPATCHED` or `EN_ROUTE_PICKUP` |
+| `PATIENT_ONBOARD` | `TRANSPORTING_PATIENT` |
+| `MISSION_COMPLETED` | `COMPLETED` |
+| `AVAILABLE`, `DECONTAMINATION` | vehicle states, not mission states |
+
+* **Preemption eligibility (FUTURE, no preemption code exists):** if EVP is ever built, privileges would be limited to `EN_ROUTE_PICKUP` and `TRANSPORTING_PATIENT`, and ignored in all other states.
 
 ---
 
@@ -93,7 +107,7 @@ stateDiagram-v2
 * **"One-Touch Emergency":**
   * Automatically detects user GPS coordinates.
   * Rapid triage questionnaire (e.g., Cardiac, Road Accident, Maternal, Respiratory, Pediatric).
-  * Instant cost estimate governed by municipal regulated fare tables (distance-based or fixed tier).
+  * Instant cost estimate governed by fare tables (UNVERIFIED: no regulated fare table is known to exist; pricing UNKNOWN).
 * **Live Telemetry & Tracking:**
   * Shows real-time position of the assigned vehicle on an interactive map.
   * Direct VoIP call with the paramedic/driver.

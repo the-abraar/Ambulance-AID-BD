@@ -1,0 +1,8 @@
+fastapi
+httpx
+pytest
+uvicorn
+alembic
+sqlalchemy
+jsonschema
+pyyaml

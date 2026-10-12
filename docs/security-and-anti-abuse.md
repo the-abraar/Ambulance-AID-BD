@@ -1,5 +1,7 @@
 # Security, Cryptography & Anti-Abuse Architecture
 
+> **Status.** Sections 1 to 4 describe a FUTURE preemption design; none of it is built. What IS built (backend only): per-user hashed bearer tokens, dispatcher/driver role checks, driver-to-mission and driver-to-vehicle binding, ping validation and rate limit, and an audit log of mission creation and status changes (`mission_audit`; not cryptographically immutable). Not built: mTLS, signed tokens, tamper detection, siren sensing, any controller interface. The `.gov.bd` names are placeholders; no government owns this project. Mission states: see `architecture/dispatch-and-citizen-platform.md` section 4.
+
 Traffic signal preemption is a high-stakes municipal capability. A vulnerability could allow malicious actors to hijack city signals or enable unethical drivers to clear traffic for non-emergencies. This document details the cryptographic safeguards and anti-abuse mechanisms governing **Ambulance-AID-BD**.
 
 ---
@@ -21,8 +23,8 @@ An ambulance does **not** get green lights simply because a driver flips an in-c
 
 ```mermaid
 flowchart TD
-    F1["Factor 1: Hardware Telemetry<br>(Siren sensor ON, Moving > 15 km/h)"]
-    F2["Factor 2: Digital Mission State<br>(Active 999 CAD or App Booking in progress)"]
+    F1["Factor 1: Hardware Telemetry<br>(Siren sensor ON; speed gate to be replaced by route-progress plausibility, since a >15 km/h rule fails in gridlock)"]
+    F2["Factor 2: Digital Mission State<br>(Active dispatcher-verified mission in state EN_ROUTE_PICKUP or TRANSPORTING_PATIENT)"]
     F3["Factor 3: Geospatial Corridor Match<br>(Heading along calculated route to hospital/scene)"]
 
     DECISION{"All 3 Factors Valid?"}
@@ -41,7 +43,7 @@ flowchart TD
    * Accelerometers confirm the vehicle is actively in motion.
 2. **Digital Mission Authorization:**
    * A valid mission ID must be actively registered in the CAD engine (generated either by a 999 emergency call-taker or a citizen emergency app request with verified phone OTP).
-   * Status must be either `DISPATCHED_TO_PATIENT` or `PATIENT_ONBOARD`.
+   * Status must be `EN_ROUTE_PICKUP` or `TRANSPORTING_PATIENT` (the earlier names `DISPATCHED_TO_PATIENT` and `PATIENT_ONBOARD` mapped to these; see `architecture/dispatch-and-citizen-platform.md` section 4). Only dispatcher-verified or 999 missions qualify; citizen-app-only bookings never do.
 3. **Geospatial & Route Plausibility:**
    * The vehicle must be progressing along a logical corridor toward the declared pickup address or a recognized emergency hospital (DMCH, BSMMU, NICVD, etc.).
    * Deviating into residential detours or stopping at commercial locations immediately revokes the preemption token.
@@ -60,7 +62,7 @@ Traffic signal controllers must verify that preemption commands originate from t
    * Claims include:
      ```json
      {
-       "iss": "bd-its-cad.gov.bd",
+       "iss": "example-issuer.invalid",
        "sub": "AMB-DHK-METRO-CH-71-4921",
        "junc": "DHK_MIRPUR_10_01",
        "phase": 2,
@@ -82,4 +84,4 @@ Traffic signal controllers must verify that preemption commands originate from t
     * Average speed through intersection.
 * **Monthly Compliance Audits:**
   * Reports are automatically distributed to the Dhaka Metropolitan Police (DMP) Traffic Division and the Directorate General of Health Services (DGHS).
-  * Vehicles flagged for frequent siren activation without valid patient bookings receive automated warnings, followed by revocation of preemption privileges and legal fines under the Road Transport Act.
+  * Vehicles flagged for frequent siren activation without valid patient bookings receive automated warnings, followed by revocation of preemption privileges and possibly further action. Legal authority for fines or citations is NOT established (UNVERIFIED).

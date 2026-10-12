@@ -1,5 +1,7 @@
 # Bangladesh Context, Challenges, and Mitigations
 
+> **FUTURE / CONCEPT ONLY.** Nothing in this document is built, agreed with any authority, or field-tested. Signal control requires prerequisites in [roadmap.md](../roadmap.md). Numbers and timings here are unsourced estimates unless cited; timing parameters conflict across docs and must be set by a licensed traffic engineer. Current mission states are in [dispatch-and-citizen-platform.md](dispatch-and-citizen-platform.md) section 4.
+
 Deploying an automated emergency preemption and dispatch system in Bangladesh presents distinct socio-technical, physical, and infrastructural challenges compared to Western or East Asian cities. This document details these obstacles and the engineering strategies to overcome them.
 
 ---
@@ -23,7 +25,7 @@ In many global cities, motorists pull over into an emergency shoulder or wide me
 Traffic in Bangladesh is characterized by high heterogeneity: heavy buses, private cars, CNG auto-rickshaws, battery rickshaws, bicycles, and handcarts all sharing the same carriageway without strict lane discipline.
 
 * **Mitigations:**
-  1. **Strict Signal Clearance Windows:** Preemption must never snap signals abruptly. Standard yellow ($\ge 4$s), all-red ($\ge 2.5$s), and pedestrian flashing clearance times prevent accidents with slower non-motorized vehicles (NMT).
+  1. **Strict Signal Clearance Windows:** Preemption must never snap signals abruptly. Yellow and all-red minimums (values UNDECIDED; this doc, `system-overview.md` and `traffic-preemption-evp.md` disagree and a licensed traffic engineer must set one table), and pedestrian flashing clearance times prevent accidents with slower non-motorized vehicles (NMT).
   2. **Motorcycle Traffic Police Integration:** For critical Tier-3 (ICU/Organ/Major Trauma) runs, the CAD engine pushes an automated escort alert to the nearest Traffic Police motorcycle patrol unit via their digital terminal to clear choke points.
 
 ---
@@ -31,7 +33,7 @@ Traffic in Bangladesh is characterized by high heterogeneity: heavy buses, priva
 ## 3. Power Reliability & Infrastructure Resilience
 
 ### 3.1 Junction Power Outages
-While main intersections in Dhaka have dedicated power lines or backup generators, localized power fluctuations or grid outages can reset traffic signal controllers.
+It is UNVERIFIED whether main Dhaka intersections have dedicated power or backups. Localized power fluctuations or grid outages can reset traffic signal controllers.
 
 * **Mitigations:**
   * **Edge Controller Battery Backup (UPS):** All automated signal poles must feature lithium iron phosphate ($LiFePO_4$) UPS units capable of providing at least 4 hours of autonomous operation during grid interruptions.
@@ -43,12 +45,12 @@ While main intersections in Dhaka have dedicated power lines or backup generator
 ## 4. Socio-Economic Realities & Fleet Syndicates
 
 ### 4.1 Fragmented Ownership & Exploitative Syndicates
-Over 80% of ambulances in Dhaka are privately owned by small businesses or independent drivers. Informal syndicates often operate outside major hospitals (e.g., Dhaka Medical College Hospital, BSMMU, Suhrawardy), controlling parking and inflating prices.
+Most ambulances in Dhaka are reportedly privately owned (UNSOURCED; an earlier draft said over 80%) by small businesses or independent drivers. Informal syndicates often operate outside major hospitals (e.g., Dhaka Medical College Hospital, BSMMU, Suhrawardy), controlling parking and inflating prices.
 
 * **Mitigations & Policy Levers:**
-  * **Regulatory Tying (BRTA & DGHS):** Bangladesh Road Transport Authority (BRTA) and Directorate General of Health Services (DGHS) can mandate that the annual vehicle fitness renewal and route permit for any ambulance require installation of a certified, tamper-proof IoT telematics unit.
-  * **The "Carrot" (Priority Access):** In exchange for joining the national platform and adhering to fair, transparent distance-based fares, private ambulance operators are granted **green wave preemption rights** through city traffic, saving them fuel and significantly boosting trip completion rates.
-  * **Whistleblower & Audit Logs:** Any vehicle detected operating commercial preemption with no verified patient booking is automatically issued an electronic citation by Dhaka Metropolitan Police (DMP).
+  * **Regulatory Tying (BRTA & DGHS):** Bangladesh Road Transport Authority (BRTA) and Directorate General of Health Services (DGHS) could, if they chose to, mandate that the annual vehicle fitness renewal and route permit for any ambulance require installation of a certified, tamper-proof IoT telematics unit.
+  * **The "Carrot" (Priority Access):** Earlier drafts proposed granting private operators preemption rights as a commercial incentive. **Removed as a design:** it rewards fake bookings (see `judge.md` blocker 5). Preemption, if ever built, would be tied to dispatcher-verified missions only.
+  * **Whistleblower & Audit Logs:** Any vehicle detected operating commercial preemption with no verified patient booking would be flagged for review. Automated citations by DMP are NOT assumed: no such authority or agreement exists.
 
 ---
 
