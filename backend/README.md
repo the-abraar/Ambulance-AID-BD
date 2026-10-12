@@ -1,6 +1,6 @@
 # Backend (MVP wedge, first piece)
 
-Mission state machine + minimal FastAPI. No signal preemption. Not deployed; SQLite dev only.
+Mission state machine + minimal FastAPI. No signal preemption. Not deployed. SQLite for dev; Postgres supported (set `AMBULANCE_DB_PATH` to a `postgresql://` URL).
 
     python -m venv .venv && .venv/bin/pip install -r requirements.txt
     .venv/bin/pytest

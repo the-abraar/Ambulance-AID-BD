@@ -139,6 +139,39 @@ paths:
             schema: {type: object, required: [name], properties: {name: {type: string, minLength: 1}}}
       responses:
         '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/DriverCreated'}}}}
+  /me/token/rotate:
+    post:
+      summary: Replace the caller's own bearer token; the old one stops working at once
+      operationId: rotateOwnToken
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: New token, shown once.
+          content: {application/json: {schema: {type: object, required: [token], properties: {token: {type: string}}}}}
+  /drivers/{driverId}/token/rotate:
+    post:
+      summary: Replace a driver's bearer token and re-enable a revoked driver (dispatcher only)
+      operationId: rotateDriverToken
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: New token, shown once.
+          content: {application/json: {schema: {type: object, required: [driver_id, token], properties: {driver_id: {type: string}, token: {type: string}}}}}
+        '403': {description: Not a dispatcher.}
+        '404': {description: Unknown driver.}
+  /drivers/{driverId}/token/revoke:
+    post:
+      summary: Revoke a driver's bearer token until it is rotated (dispatcher only)
+      operationId: revokeDriverToken
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Revoked.}
+        '403': {description: Not a dispatcher.}
+        '404': {description: Unknown driver.}
   /missions/{missionId}/audit:
     get:
       summary: Status-change audit trail (dispatcher only)

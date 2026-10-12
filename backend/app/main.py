@@ -1,10 +1,9 @@
 import os
-import threading
+import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import sqlite3
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -12,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from .bootstrap import add_user, add_vehicle
-from .db import connect, hash_token
+from .db import Conn, IntegrityError, hash_token, migrate, open_db
 from .state_machine import INITIAL, TRANSITIONS, InvalidTransition, State, required_role, transition
 
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
@@ -22,26 +21,22 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
                ping_min_interval_s: float = 1.0) -> FastAPI:
     path = db_path or os.environ.get("AMBULANCE_DB_PATH", "dev.db")
     app = FastAPI(title="Ambulance-AID MVP")
-    db = connect(path)
-    last_ping: dict[str, float] = {}  # shortcut: per-process rate limit; move to Redis/DB when running >1 worker.
+    migrate(path)
 
-    lock = threading.Lock()
+    def get_db():
+        # One connection per request; anything left uncommitted is rolled back.
+        db = open_db(path)
+        try:
+            yield db
+        finally:
+            db.rollback()
+            db.close()
 
-    def serialized():
-        # One shared connection: hold a lock for the whole request so one request's commit
-        # cannot commit another's half-written work; roll back anything left uncommitted.
-        # shortcut: serializes all requests, move to per-request connections if throughput matters.
-        with lock:
-            try:
-                yield
-            finally:
-                db.rollback()
-
-    def user(authorization: str | None = Header(None), _: None = Depends(serialized)) -> dict:
+    def user(authorization: str | None = Header(None), db: Conn = Depends(get_db)) -> dict:
         if authorization and authorization.startswith("Bearer "):
             row = db.execute(
                 "SELECT u.id, u.role, d.id AS driver_id FROM users u LEFT JOIN drivers d ON d.user_id=u.id "
-                "WHERE u.token_hash=?", (hash_token(authorization[7:]),)).fetchone()
+                "WHERE u.token_hash=? AND u.revoked_at IS NULL", (hash_token(authorization[7:]),)).fetchone()
             if row:
                 return dict(row)
         raise HTTPException(401, "invalid or missing bearer token")
@@ -76,16 +71,16 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         d["mission_id"] = d.pop("id")
         return d
 
-    def audit(mid: str, uid: str, src: str | None, dst: str, t: str):
+    def audit(db: Conn, mid: str, uid: str, src: str | None, dst: str, t: str):
         db.execute("INSERT INTO mission_audit (mission_id,user_id,from_status,to_status,ts) VALUES (?,?,?,?,?)",
                    (mid, uid, src, dst, t))
 
     @app.post("/missions", status_code=201)
-    def create_mission(body: MissionIn, u: dict = Depends(user)):
+    def create_mission(body: MissionIn, u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "dispatcher":
             raise HTTPException(403, "dispatcher only")
         if body.assigned_vehicle_id and not db.execute(
-                "SELECT 1 FROM vehicles WHERE id=? AND active=1", (body.assigned_vehicle_id,)).fetchone():
+                "SELECT 1 FROM vehicles WHERE id=? AND active", (body.assigned_vehicle_id,)).fetchone():
             raise HTTPException(422, "unknown or inactive vehicle")
         if body.assigned_driver_id and not db.execute(
                 "SELECT 1 FROM drivers WHERE id=?", (body.assigned_driver_id,)).fetchone():
@@ -95,19 +90,19 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
                    "updated_at,pickup_lat,pickup_lng) VALUES (?,?,?,?,?,?,?,?,?)",
                    (mid, INITIAL.value, body.pickup_address, body.assigned_vehicle_id, body.assigned_driver_id, t, t,
                     body.pickup_lat, body.pickup_lng))
-        audit(mid, u["id"], None, INITIAL.value, t)
+        audit(db, mid, u["id"], None, INITIAL.value, t)
         db.commit()
         return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
 
     @app.get("/missions")
-    def list_missions(status: State | None = None, u: dict = Depends(user)):
+    def list_missions(status: State | None = None, u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "dispatcher":
             raise HTTPException(403, "dispatcher only")
-        rows = db.execute("SELECT * FROM missions WHERE (?1 IS NULL OR status=?1) ORDER BY created_at",
-                          (status.value if status else None,)).fetchall()
+        rows = db.execute("SELECT * FROM missions WHERE (CAST(? AS TEXT) IS NULL OR status=?) ORDER BY created_at",
+                          (status.value if status else None,) * 2).fetchall()
         return [out(r) for r in rows]
 
-    def load(mid: str):
+    def load(db: Conn, mid: str):
         try:
             uuid.UUID(mid)
         except ValueError:
@@ -123,24 +118,24 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         return u
 
     @app.get("/me")
-    def me(u: dict = Depends(user)):
+    def me(u: dict = Depends(user), db: Conn = Depends(get_db)):
         r = {"role": u["role"], "user_id": u["id"]}
         if u["role"] == "driver":
             r["driver_id"] = u["driver_id"]
-            m = current_row(u)
+            m = current_row(db, u)
             r["vehicle_id"] = m["assigned_vehicle_id"] if m else None
         return r
 
-    def current_row(u):
+    def current_row(db: Conn, u):
         return db.execute(
             f"SELECT * FROM missions WHERE assigned_driver_id=? AND status NOT IN ({','.join('?' * len(TERMINAL))}) "
             "ORDER BY created_at DESC LIMIT 1", (u["driver_id"], *TERMINAL)).fetchone()
 
     @app.get("/missions/current")
-    def current_mission(u: dict = Depends(user)):
+    def current_mission(u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "driver":
             raise HTTPException(403, "driver only")
-        m = current_row(u)
+        m = current_row(db, u)
         if not m:
             raise HTTPException(404, "no active mission")
         return out(m)
@@ -158,7 +153,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         name: str = Field(min_length=1)
 
     @app.get("/vehicles")
-    def list_vehicles(u: dict = Depends(dispatcher_only)):
+    def list_vehicles(u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         rows = db.execute(
             "SELECT v.id, v.operator, v.registration, v.active, p.lat, p.lng, p.ts FROM vehicles v "
             "LEFT JOIN vehicle_pings p ON p.id=(SELECT id FROM vehicle_pings WHERE vehicle_id=v.id "
@@ -169,38 +164,39 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
                 for r in rows]
 
     @app.post("/vehicles", status_code=201)
-    def create_vehicle(body: VehicleIn, u: dict = Depends(dispatcher_only)):
+    def create_vehicle(body: VehicleIn, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         try:
             vid = add_vehicle(db, body.operator, body.registration)
-        except sqlite3.IntegrityError:
+        except IntegrityError:
+            db.rollback()
             raise HTTPException(409, "registration already exists")
         return {"vehicle_id": vid, "operator": body.operator, "registration": body.registration, "active": True,
                 "last_ping": None}
 
     @app.get("/drivers")
-    def list_drivers(u: dict = Depends(dispatcher_only)):
+    def list_drivers(u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         return [{"driver_id": r["id"], "name": r["name"]}
                 for r in db.execute("SELECT id, name FROM drivers ORDER BY name")]
 
     @app.post("/drivers", status_code=201)
-    def create_driver(body: DriverIn, u: dict = Depends(dispatcher_only)):
+    def create_driver(body: DriverIn, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         did, tok = add_user(db, body.name, "driver")
         return {"driver_id": did, "name": body.name, "token": tok}  # token shown once; only its hash is stored
 
     @app.get("/missions/{mid}/audit")
-    def mission_audit(mid: str, u: dict = Depends(dispatcher_only)):
-        load(mid)
+    def mission_audit(mid: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
+        load(db, mid)
         return [dict(r) for r in db.execute(
             "SELECT user_id, from_status, to_status, ts FROM mission_audit WHERE mission_id=? ORDER BY id", (mid,))]
 
     @app.get("/missions/{mid}")
-    def get_mission(mid: str, u: dict = Depends(user)):
-        row = load(mid)
+    def get_mission(mid: str, u: dict = Depends(user), db: Conn = Depends(get_db)):
+        row = load(db, mid)
         if u["role"] != "dispatcher" and row["assigned_driver_id"] != u["driver_id"]:
             raise HTTPException(403, "not your mission")
         return out(row)
 
-    def advance(mid: str, uid: str, expected: str, new: str):
+    def advance(db: Conn, mid: str, uid: str, expected: str, new: str):
         # Compare-and-set on the status we validated against; audit row in the same transaction.
         t = now()
         cur = db.execute("UPDATE missions SET status=?, updated_at=? WHERE id=? AND status=?",
@@ -208,28 +204,28 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         if cur.rowcount != 1:
             db.rollback()
             raise HTTPException(409, "mission status changed concurrently")
-        audit(mid, uid, expected, new, t)
+        audit(db, mid, uid, expected, new, t)
         db.commit()
 
     app.state.advance = advance
 
     @app.patch("/missions/{mid}/status")
-    def set_status(mid: str, body: StatusIn, u: dict = Depends(user)):
+    def set_status(mid: str, body: StatusIn, u: dict = Depends(user), db: Conn = Depends(get_db)):
         need = required_role(body.status)
         if u["role"] != need:
             raise HTTPException(403, f"{need} only for {body.status.value}")
-        row = load(mid)
+        row = load(db, mid)
         if need == "driver" and row["assigned_driver_id"] != u["driver_id"]:
             raise HTTPException(403, "not the assigned driver")
         try:
             new = transition(State(row["status"]), body.status)
         except InvalidTransition as e:
             raise HTTPException(409, str(e))
-        advance(mid, u["id"], row["status"], new.value)
-        return out(load(mid))
+        advance(db, mid, u["id"], row["status"], new.value)
+        return out(load(db, mid))
 
     @app.post("/vehicles/{vid}/pings", status_code=201)
-    def ping(vid: str, body: PingIn, u: dict = Depends(user)):
+    def ping(vid: str, body: PingIn, u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "driver":
             raise HTTPException(403, "driver only")
         if not db.execute(
@@ -241,17 +237,23 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         ts, n = body.ts.astimezone(timezone.utc), datetime.now(timezone.utc)
         if ts < n - timedelta(seconds=ping_max_age_s) or ts > n + timedelta(seconds=ping_max_future_s):
             raise HTTPException(422, "ts outside accepted window")
-        m = time.monotonic()
-        if m - last_ping.get(vid, -1e9) < ping_min_interval_s:
-            raise HTTPException(429, "ping rate limit")
-        last_ping[vid] = m
+        # Rate limit in the DB so it holds across workers: the UPDATE wins if the last ping is old enough;
+        # otherwise the INSERT collides on the primary key (row exists and is too recent) and we answer 429.
+        wall = time.time()
+        if db.execute("UPDATE ping_limit SET last_at=? WHERE vehicle_id=? AND last_at<=?",
+                      (wall, vid, wall - ping_min_interval_s)).rowcount != 1:
+            try:
+                db.execute("INSERT INTO ping_limit (vehicle_id,last_at) VALUES (?,?)", (vid, wall))
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(429, "ping rate limit")
         db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts) VALUES (?,?,?,?)",
                    (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds")))
         db.commit()
         return {"ok": True}
 
     @app.get("/vehicles/{vid}/position")
-    def position(vid: str, u: dict = Depends(user)):
+    def position(vid: str, u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "dispatcher":
             raise HTTPException(403, "dispatcher only")
         row = db.execute("SELECT lat,lng,ts FROM vehicle_pings WHERE vehicle_id=? ORDER BY ts DESC LIMIT 1",
@@ -259,6 +261,31 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         if not row:
             raise HTTPException(404, "no position")
         return {"vehicle_id": vid, **dict(row)}
+
+    def new_token(db: Conn, user_id: str) -> str:
+        tok = secrets.token_urlsafe(32)
+        db.execute("UPDATE users SET token_hash=?, revoked_at=NULL WHERE id=?", (hash_token(tok), user_id))
+        db.commit()
+        return tok
+
+    def driver_user(db: Conn, did: str) -> str:
+        row = db.execute("SELECT user_id FROM drivers WHERE id=?", (did,)).fetchone()
+        if not row:
+            raise HTTPException(404, "unknown driver")
+        return row["user_id"]
+
+    @app.post("/me/token/rotate")
+    def rotate_own_token(u: dict = Depends(user), db: Conn = Depends(get_db)):
+        return {"token": new_token(db, u["id"])}  # old token stops working at once; new one shown once
+
+    @app.post("/drivers/{did}/token/rotate")
+    def rotate_driver_token(did: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
+        return {"driver_id": did, "token": new_token(db, driver_user(db, did))}  # also re-enables a revoked driver
+
+    @app.post("/drivers/{did}/token/revoke", status_code=204)
+    def revoke_driver_token(did: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
+        db.execute("UPDATE users SET revoked_at=? WHERE id=?", (now(), driver_user(db, did)))
+        db.commit()
 
     web = Path(__file__).resolve().parent.parent / "web"
     for mount, sub in (("/console", "dispatcher"), ("/driver", "driver")):

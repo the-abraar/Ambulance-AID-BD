@@ -153,7 +153,7 @@ function render() {
   if (!mission) h += `<div class="card">${esc(t('none'))}</div>`;
   else {
     const nx = trans[mission.status] || [];
-    h += `<div class="card"><h2>${esc(t('mission'))} #${esc(mission.mission_id)}</h2>
+    h += `<div class="card"><h2>${esc(t('mission'))} #<span title="${esc(mission.mission_id)}">${esc(mission.mission_id.slice(0, 8))}</span></h2>
       <p>${esc(t('status'))}: <span class="badge">${sl(mission.status)}</span></p>
       <p>${esc(t('pickup'))}: ${esc(mission.pickup_address)}</p>${navLink(mission)}</div>
       <h3>${esc(t('next'))}</h3>` +

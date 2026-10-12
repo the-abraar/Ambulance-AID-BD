@@ -13,19 +13,19 @@ def iso(**kw):
 
 
 @pytest.fixture
-def env(tmp_path):
-    app = create_app(str(tmp_path / "t.db"), ping_min_interval_s=0)
+def env(target):
+    app = create_app(target, ping_min_interval_s=0)
     c = TestClient(app)
     # second connection to the same file just for seeding; commit makes it visible
     from app.db import connect
-    db = connect(str(tmp_path / "t.db"))
+    db = connect(target)
     did, dt = add_user(db, "disp", "dispatcher")
     drv, vt = add_user(db, "drv1", "driver")
     drv2, vt2 = add_user(db, "drv2", "driver")
     veh = add_vehicle(db, "Op", "DHK-1")
     veh2 = add_vehicle(db, "Op", "DHK-2")
     h = lambda t: {"Authorization": f"Bearer {t}"}
-    return dict(c=c, app=app, db=db, D=h(dt), V=h(vt), V2=h(vt2), drv=drv, veh=veh, veh2=veh2, path=str(tmp_path / "t.db"))
+    return dict(c=c, app=app, db=db, D=h(dt), V=h(vt), V2=h(vt2), drv=drv, veh=veh, veh2=veh2, path=target)
 
 
 def mk(e, **kw):
@@ -86,7 +86,7 @@ def test_assignment_validation(env):
     c, D = env["c"], env["D"]
     assert c.post("/missions", json={"pickup_address": "x", "assigned_vehicle_id": "nope"}, headers=D).status_code == 422
     assert c.post("/missions", json={"pickup_address": "x", "assigned_driver_id": "nope"}, headers=D).status_code == 422
-    env["db"].execute("UPDATE vehicles SET active=0 WHERE id=?", (env["veh2"],)); env["db"].commit()
+    env["db"].execute("UPDATE vehicles SET active=? WHERE id=?", (False, env["veh2"])); env["db"].commit()
     assert c.post("/missions", json={"pickup_address": "x", "assigned_vehicle_id": env["veh2"]}, headers=D).status_code == 422
 
 
@@ -130,7 +130,7 @@ def test_ping_auth_and_binding(env):
     assert c.post(f"/vehicles/{v}/pings", json=b, headers=env["V"]).status_code == 403  # mission over
 
 
-def test_ping_rate_limit_and_position(env, tmp_path):
+def test_ping_rate_limit_and_position(env):
     app = create_app(env["path"], ping_min_interval_s=60)
     c = TestClient(app)
     mk(env)
@@ -150,7 +150,7 @@ def test_stale_status_update_conflicts_without_audit(env):
     n = lambda: env["db"].execute("SELECT COUNT(*) FROM mission_audit WHERE mission_id=?", (mid,)).fetchone()[0]
     before = n()
     with pytest.raises(HTTPException) as ei:  # loser validated against the pre-cancel status
-        env["app"].state.advance(mid, "u", "DISPATCHED", "EN_ROUTE_PICKUP")
+        env["app"].state.advance(env["db"], mid, "u", "DISPATCHED", "EN_ROUTE_PICKUP")
     assert ei.value.status_code == 409
     assert n() == before
     assert env["c"].get(f"/missions/{mid}", headers=env["D"]).json()["status"] == "CANCELLED"

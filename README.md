@@ -5,14 +5,14 @@
 ## Honest status (as of 2026-10-12)
 
 **What exists**
-- A tested backend (`backend/`, Python/FastAPI): mission state machine, mission create/status/read APIs, vehicle GPS pings, per-user hashed bearer tokens, role checks (dispatcher vs assigned driver), a mission audit log, Alembic migrations. SQLite for dev. Agent-written; test results are agent-reported (see `judge.md`).
+- A tested backend (`backend/`, Python/FastAPI): mission state machine, mission create/status/read APIs, vehicle GPS pings, per-user hashed bearer tokens, role checks (dispatcher vs assigned driver), a mission audit log, Alembic migrations, token rotate/revoke, a DB-backed ping rate limit. SQLite for dev, Postgres supported. Agent-written; test results are agent-reported (see `judge.md`).
 - Design documents under `docs/` and an OpenAPI spec (`docs/api-spec/openapi.yaml`).
 
 **What does not exist**
 - No signal integration or signal-control code of any kind.
 - No partners, no pilot LOI, no government engagement, no legal opinion.
 - No field testing, no real vehicles, no real users. No driver app or dispatcher console UI.
-- Not deployed. CI has never run on GitHub. Postgres/PostGIS not exercised.
+- Not deployed. CI has never run on GitHub. Postgres tested only on a local embedded server (not CI yet); PostGIS not used.
 - No measured baseline data. Impact figures in the architecture docs are unsourced estimates (see labels in those docs).
 
 ## Current phase: the wedge MVP

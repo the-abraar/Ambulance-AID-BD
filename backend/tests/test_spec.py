@@ -49,3 +49,8 @@ def test_responses_match_spec(env):  # noqa: F811
     # the schema must actually bite
     with pytest.raises(AssertionError):
         check("Mission", {"id": m, "status": "DISPATCHED"})
+
+
+def test_token_endpoints_in_spec():
+    for path in ("/me/token/rotate", "/drivers/{driverId}/token/rotate", "/drivers/{driverId}/token/revoke"):
+        assert "post" in SPEC["paths"][path]

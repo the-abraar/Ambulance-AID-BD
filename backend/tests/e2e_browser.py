@@ -26,7 +26,7 @@ INDEX = []
 PATH = ["DISPATCHED", "EN_ROUTE_PICKUP", "AT_SCENE", "TRANSPORTING_PATIENT", "AT_HOSPITAL", "COMPLETED"]
 BN = {"DISPATCHED": "প্রেরিত", "EN_ROUTE_PICKUP": "পিকআপের পথে", "AT_SCENE": "ঘটনাস্থলে",
       "TRANSPORTING_PATIENT": "রোগী নিয়ে যাচ্ছি", "AT_HOSPITAL": "হাসপাতালে পৌঁছেছি", "COMPLETED": "সম্পন্ন"}
-EXPECTED_ERR = re.compile(r"Failed to load resource.*\b(401|404|409)\b")  # deliberate 401/409; 404 = no active mission
+EXPECTED_ERR = re.compile(r"Failed to load resource.*\b(401|404|409|429)\b")  # deliberate 401/409; 404 = no active mission
 checks = 0
 
 
@@ -164,6 +164,39 @@ def run(base, dtok):
         shot(drv, "driver_360_409.png", "driver app 360x740, 409 error shown after dispatcher cancelled the mission")
         ok(api(base, dtok, "/missions?status=CANCELLED")[0]["status"] == "CANCELLED", "mission stays CANCELLED")
 
+        # denied GPS: the same driver in a browser without location permission, mission active again
+        new_mission("Banani-1")
+        den = page_in(b.new_context(viewport={"width": 360, "height": 740}, service_workers="block"))
+        den.goto(base + "/driver/"); den.fill("#tk", dr_tok); den.click("#f button")
+        den.wait_for_selector("#status .err")
+        ok("জিপিএস অনুমতি নেই" in den.inner_text("#status"), "denied GPS shows the Bangla permission message")
+        shot(den, "driver_360_gps_denied.png", "driver app 360x740, Bangla GPS-denied message on an active mission")
+
+        # offline replay: pings taken offline are queued in localStorage, then sent once back online
+        drv.click("#rf"); drv.wait_for_selector(".badge")
+        queue = lambda: drv.evaluate("JSON.parse(localStorage.getItem('driver_ping_queue')||'[]')")
+        time.sleep(5.2)  # past the app's 5 s ping throttle
+        dctx.set_offline(True)
+        dctx.set_geolocation({"latitude": 23.9, "longitude": 90.5})
+        end = time.time() + 15
+        while time.time() < end and not queue():
+            time.sleep(0.3)
+        ok(queue() and queue()[0]["lat"] == 23.9, "offline ping is queued in localStorage")
+        shot(drv, "driver_360_offline.png", "driver app 360x740, offline banner with a queued ping")
+        dctx.set_offline(False)
+        end = time.time() + 20
+        while time.time() < end and queue():
+            time.sleep(0.5)
+        ok(not queue(), "queue drained after going back online")
+        ok(abs(api(base, dtok, f"/vehicles/{veh_id}/position")["lat"] - 23.9) < 1e-6, "replayed ping reached the server")
+
+        # 429: two pings in a row from the driver's own token hit the 1 s per-vehicle limit
+        codes = drv.evaluate("""async ([vid, tok]) => {
+            const send = () => fetch(`/vehicles/${vid}/pings`, {method: 'POST', body: JSON.stringify({lat: 1, lng: 2, ts: new Date().toISOString()}),
+              headers: {Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json'}}).then(r => r.status);
+            return [await send(), await send(), await send()]; }""", [veh_id, dr_tok])
+        ok(429 in codes, f"server answers 429 on rapid pings (got {codes})")
+
         # 401: bad token
         bctx = b.new_context(viewport={"width": 360, "height": 740})
         bad = page_in(bctx)
@@ -174,7 +207,7 @@ def run(base, dtok):
         shot(con, "console_1280_final.png", "console 1280x800, Mirpur-10 COMPLETED and Gulshan-2 CANCELLED")
         b.close()
     bad_errs = [e for e in errors if not EXPECTED_ERR.search(e)]
-    ok(not bad_errs, f"no unexpected console errors (expected 401/404/409 resource errors seen: {len(errors) - len(bad_errs)}; unexpected: {bad_errs})")
+    ok(not bad_errs, f"no unexpected console errors (expected 401/404/409/429 resource errors seen: {len(errors) - len(bad_errs)}; unexpected: {bad_errs})")
 
 
 if __name__ == "__main__":
