@@ -1,0 +1,368 @@
+openapi: 3.0.3
+info:
+  title: Ambulance-AID-BD API
+  description: >
+    OpenAPI specification for the Ambulance Automated Infrastructure Dispatch & 
+    Traffic Preemption Platform for Bangladesh.
+  version: 1.0.0
+  contact:
+    name: Ambulance-AID-BD Working Group
+    url: https://github.com/the-abraar/Ambulance-AID-BD
+
+servers:
+  - url: https://api.ambulance-aid.gov.bd/v1
+    description: Production National Gateway
+  - url: https://staging.ambulance-aid.gov.bd/v1
+    description: Staging / Sandbox Environment
+
+paths:
+  /telemetry/ingest:
+    post:
+      summary: Ingest vehicle telematics ping
+      description: Streamed by IoT trackers or driver terminals every 1-5 seconds.
+      operationId: ingestTelemetry
+      security:
+        - MutualTLS: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryPing'
+      responses:
+        '202':
+          description: Telemetry accepted and queued for corridor engine processing.
+        '400':
+          description: Invalid payload or schema error.
+        '401':
+          description: Unauthorized vehicle certificate.
+
+  /missions:
+    post:
+      summary: Create emergency dispatch mission
+      description: Initiated by 999 dispatchers or validated citizen emergency app bookings.
+      operationId: createMission
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionCreateRequest'
+      responses:
+        '201':
+          description: Mission created and assigned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+
+  /missions/{missionId}/status:
+    patch:
+      summary: Update mission lifecycle status
+      description: Toggled by the driver CAD tablet or hospital check-in.
+      operationId: updateMissionStatus
+      parameters:
+        - name: missionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionStatusUpdate'
+      responses:
+        '200':
+          description: Status updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+
+  /preemption/trigger:
+    post:
+      summary: Send emergency signal preemption command to Traffic Management Center (TMC)
+      description: Sent by the Corridor Engine when an active mission reaches the ETA threshold of an intersection.
+      operationId: triggerPreemption
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreemptionTriggerRequest'
+      responses:
+        '200':
+          description: Preemption acknowledged by signal controller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreemptionResponse'
+        '403':
+          description: Preemption rejected (Anti-abuse validation failed).
+
+  /preemption/release:
+    post:
+      summary: Release signal preemption hold
+      description: Sent immediately after the ambulance clears the intersection or times out.
+      operationId: releasePreemption
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreemptionReleaseRequest'
+      responses:
+        '200':
+          description: Preemption released; controller returning to coordinated cycle.
+
+  /ambulances/available:
+    get:
+      summary: Query nearby available ambulances
+      description: Public & 999 endpoint to discover available emergency vehicles within a radius.
+      operationId: getAvailableAmbulances
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: longitude
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: radius_km
+          in: query
+          required: false
+          schema:
+            type: number
+            default: 5.0
+        - name: tier
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [BLS, ALS, ICU, NICU]
+      responses:
+        '200':
+          description: List of available ambulances.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AmbulancePublicSummary'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    MutualTLS:
+      type: apiKey
+      name: X-Client-Cert-SHA256
+      in: header
+
+  schemas:
+    TelemetryPing:
+      type: object
+      required:
+        - vehicle_id
+        - timestamp
+        - latitude
+        - longitude
+        - heading
+        - speed_kph
+        - siren_engaged
+      properties:
+        vehicle_id:
+          type: string
+          example: "AMB-DHK-CH-71-4921"
+        timestamp:
+          type: string
+          format: date-time
+        latitude:
+          type: number
+          format: double
+          example: 23.8103
+        longitude:
+          type: number
+          format: double
+          example: 90.4125
+        heading:
+          type: number
+          format: float
+          example: 184.5
+        speed_kph:
+          type: number
+          format: float
+          example: 42.5
+        siren_engaged:
+          type: boolean
+          example: true
+        active_mission_id:
+          type: string
+          nullable: true
+          example: "MSN-20261012-9841"
+
+    MissionCreateRequest:
+      type: object
+      required:
+        - caller_phone
+        - pickup_latitude
+        - pickup_longitude
+        - required_tier
+      properties:
+        caller_phone:
+          type: string
+          example: "+8801711000000"
+        pickup_latitude:
+          type: number
+          format: double
+          example: 23.805
+        pickup_longitude:
+          type: number
+          format: double
+          example: 90.368
+        destination_hospital_id:
+          type: string
+          example: "HOSP-DMCH-01"
+        required_tier:
+          type: string
+          enum: [BLS, ALS, ICU, NICU]
+          example: "ICU"
+        emergency_category:
+          type: string
+          example: "CARDIAC_ARREST"
+
+    MissionStatusUpdate:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - DISPATCHED
+            - EN_ROUTE_PICKUP
+            - AT_SCENE
+            - TRANSPORTING_PATIENT
+            - AT_HOSPITAL
+            - COMPLETED
+            - CANCELLED
+          example: "TRANSPORTING_PATIENT"
+        notes:
+          type: string
+          example: "Patient vitals stabilized, oxygen on at 10L/min"
+
+    Mission:
+      type: object
+      properties:
+        mission_id:
+          type: string
+          example: "MSN-20261012-9841"
+        status:
+          type: string
+          example: "TRANSPORTING_PATIENT"
+        assigned_vehicle_id:
+          type: string
+          example: "AMB-DHK-CH-71-4921"
+        pickup_address:
+          type: string
+          example: "House 12, Road 4, Mirpur-10, Dhaka"
+        destination_hospital:
+          type: string
+          example: "National Institute of Cardiovascular Diseases (NICVD)"
+        created_at:
+          type: string
+          format: date-time
+
+    PreemptionTriggerRequest:
+      type: object
+      required:
+        - junction_id
+        - mission_id
+        - target_approach
+        - estimated_arrival_seconds
+        - max_hold_seconds
+      properties:
+        junction_id:
+          type: string
+          example: "DHK_MIRPUR_10_01"
+        mission_id:
+          type: string
+          example: "MSN-20261012-9841"
+        target_approach:
+          type: string
+          example: "NORTH_TO_SOUTH"
+        estimated_arrival_seconds:
+          type: integer
+          example: 75
+        max_hold_seconds:
+          type: integer
+          example: 90
+
+    PreemptionResponse:
+      type: object
+      properties:
+        preemption_id:
+          type: string
+          example: "PRE-20261012-00431"
+        status:
+          type: string
+          enum: [QUEUED, IN_TRANSITION, HOLDING_GREEN, REJECTED]
+          example: "IN_TRANSITION"
+        clearance_duration_seconds:
+          type: integer
+          example: 8
+
+    PreemptionReleaseRequest:
+      type: object
+      required:
+        - junction_id
+        - preemption_id
+      properties:
+        junction_id:
+          type: string
+          example: "DHK_MIRPUR_10_01"
+        preemption_id:
+          type: string
+          example: "PRE-20261012-00431"
+
+    AmbulancePublicSummary:
+      type: object
+      properties:
+        vehicle_id:
+          type: string
+          example: "AMB-DHK-CH-71-4921"
+        tier:
+          type: string
+          enum: [BLS, ALS, ICU, NICU]
+          example: "ALS"
+        operator_name:
+          type: string
+          example: "Square Hospital Emergency Fleet"
+        current_distance_km:
+          type: number
+          format: float
+          example: 1.8
+        estimated_pickup_minutes:
+          type: integer
+          example: 7
+        base_fare_bdt:
+          type: integer
+          example: 2500
+        per_km_bdt:
+          type: integer
+          example: 120
