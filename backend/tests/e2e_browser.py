@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import json
 from pathlib import Path
@@ -205,6 +206,35 @@ def run(base, dtok):
         ok(True, "driver app shows its 429 message when a ping is refused")
         shot(drv, "driver_360_429.png", "driver app 360x740, English 429 'Too many requests' message")
         drv.unroute("**/pings")
+
+        # token expiry banner: /me stubbed with a token that expires in 2 days
+        soon = page_in(b.new_context(viewport={"width": 360, "height": 740}, service_workers="block"))
+        exp = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + 2 * 86400))
+        soon.route("**/me", lambda r: r.fulfill(json={"role": "driver", "user_id": "u", "driver_id": "d", "vehicle_id": None, "token_expires_at": exp}))
+        soon.route("**/missions/current", lambda r: r.fulfill(status=404, json={"detail": "no active mission"}))
+        soon.route("**/meta/transitions", lambda r: r.fulfill(json={}))
+        soon.goto(base + "/driver/"); soon.fill("#tk", "any"); soon.click("#f button")
+        soon.wait_for_function("document.getElementById('status').textContent.includes('৭ দিনের মধ্যে')", timeout=10000)
+        ok(True, "driver sees the token-expiry banner within 7 days of expiry")
+        shot(soon, "driver_360_token_expiry.png", "driver app 360x740, Bangla token-expiry banner")
+
+        # console token buttons: rotate kills the old token, revoke kills the new one
+        con.on("dialog", lambda d: d.accept())
+        tok_ok = lambda t: urllib.request.urlopen(urllib.request.Request(base + "/me", headers={"Authorization": "Bearer " + t})).status
+        def tok_dead(t):
+            try:
+                tok_ok(t); return False
+            except urllib.error.HTTPError as e:
+                return e.code == 401
+        row = con.locator("#drivers tbody tr:has-text('Rahim')")
+        row.locator("button:has-text('Rotate token')").click()
+        con.wait_for_function("document.getElementById('newtok').textContent.includes('New token for Rahim')")
+        new_tok = re.search(r":\s*(\S+)$", con.inner_text("#newtok")).group(1)
+        ok(tok_dead(dr_tok) and tok_ok(new_tok) == 200, "console rotate: old driver token dead, new one works")
+        shot(con, "console_1280_token_rotated.png", "console 1280x800, new driver token shown once after rotate")
+        row.locator("button:has-text('Revoke')").click()
+        con.wait_for_selector(".toast:has-text('Token revoked')")
+        ok(tok_dead(new_tok), "console revoke: driver token no longer works")
 
         # 401: bad token
         bctx = b.new_context(viewport={"width": 360, "height": 740})

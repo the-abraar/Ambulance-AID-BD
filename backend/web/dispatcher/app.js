@@ -32,7 +32,7 @@ async function api(method, path, body) {
     else if (r.status >= 400) toast("Error " + r.status + " " + d);
     throw new Error(r.status + " " + d);
   }
-  return r.json();
+  return r.status === 204 ? null : r.json();
 }
 const short = (s) => (s ? s.slice(0, 8) : "-");
 const nameOf = (list, key, id, f) => { const x = list.find((i) => i[key] === id); return x ? f(x) : short(id); };
@@ -57,7 +57,9 @@ function renderVehicles() {
   sel.value = cur;
 }
 function renderDrivers() {
-  fill($("drivers").tBodies[0], drivers.map((d) => h("tr", {}, h("td", { textContent: d.name }), h("td", { textContent: d.driver_id }))));
+  fill($("drivers").tBodies[0], drivers.map((d) => h("tr", {}, h("td", { textContent: d.name }), h("td", { textContent: d.driver_id }),
+    h("td", {}, h("button", { textContent: "Rotate token", onclick: () => rotateToken(d) }),
+      h("button", { textContent: "Revoke", onclick: () => revokeToken(d) })))));
   const sel = $("newm").elements.drv, cur = sel.value;
   sel.replaceChildren(h("option", { value: "", textContent: "(none)" }),
     ...drivers.map((d) => h("option", { value: d.driver_id, textContent: d.name })));
@@ -89,6 +91,17 @@ async function refresh() {
 async function setStatus(id, status) {
   try { await api("PATCH", `/missions/${id}/status`, { status }); } catch (e) { /* toast shown */ }
   refresh();
+}
+async function rotateToken(d) {
+  try {
+    const r = await api("POST", `/drivers/${encodeURIComponent(d.driver_id)}/token/rotate`);
+    $("newtok").textContent = `New token for ${d.name} (shown once, copy now; the old one no longer works; expires ${new Date(r.expires_at).toLocaleDateString()}): ${r.token}`;
+    $("newtok").hidden = false;
+  } catch (e) { /* toast shown */ }
+}
+async function revokeToken(d) {
+  if (!confirm(`Revoke ${d.name}'s token? The driver is signed out until you rotate a new one.`)) return;
+  try { await api("POST", `/drivers/${encodeURIComponent(d.driver_id)}/token/revoke`); toast(`Token revoked for ${d.name}`); } catch (e) { /* toast shown */ }
 }
 async function showAudit(id) {
   try {

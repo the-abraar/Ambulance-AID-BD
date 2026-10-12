@@ -1,5 +1,6 @@
 import hashlib
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from psycopg_pool import ConnectionPool
 IntegrityError = (sqlite3.IntegrityError, psycopg.IntegrityError)
 TOKEN_TTL_DAYS = 90  # keep equal to the constant in migration 0004
 _pools: dict[str, ConnectionPool] = {}
+_pools_lock = threading.Lock()
 
 
 def _is_pg(target: str) -> bool:
@@ -24,10 +26,14 @@ def migrate(target: str) -> None:
     url = target.replace("postgres://", "postgresql://", 1).replace("postgresql://", "postgresql+psycopg://", 1) \
         if _is_pg(target) else f"sqlite:///{target}"
     cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    if _is_pg(target):  # several workers start at once: one migrates, the rest wait (lock frees when the connection closes)
+        with psycopg.connect(target, autocommit=True) as lock:
+            lock.execute("SELECT pg_advisory_lock(727274)")
+            command.upgrade(cfg, "head")
+        return
     command.upgrade(cfg, "head")
-    if not _is_pg(target):  # WAL lets per-request connections read while another writes; persists in the file
-        with sqlite3.connect(target) as c:
-            c.execute("PRAGMA journal_mode=WAL")
+    with sqlite3.connect(target) as c:  # WAL lets per-request connections read while another writes; persists in the file
+        c.execute("PRAGMA journal_mode=WAL")
 
 
 class Row(tuple):
@@ -75,10 +81,11 @@ class Conn:
 def open_db(target: str, pooled: bool = True) -> Conn:
     """A SQLite connection, or a Postgres one from a per-URL pool (opened lazily, kept for the process)."""
     if _is_pg(target) and pooled:
-        if target not in _pools:
-            _pools[target] = ConnectionPool(target, min_size=1, max_size=10, kwargs={"row_factory": _row_factory},
-                                            check=ConnectionPool.check_connection, open=True)
-        pool = _pools[target]
+        with _pools_lock:
+            if target not in _pools:
+                _pools[target] = ConnectionPool(target, min_size=1, max_size=10, kwargs={"row_factory": _row_factory},
+                                                check=ConnectionPool.check_connection, open=True)
+            pool = _pools[target]
         return Conn(pool.getconn(), True, pool)
     if _is_pg(target):
         return Conn(psycopg.connect(target, row_factory=_row_factory), True)

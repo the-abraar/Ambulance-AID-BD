@@ -306,3 +306,9 @@ Edited at the user's explicit request (`AGENTS.md` otherwise says not to edit th
 
 **Still open, unchanged:** gaps 1, 5, 7 and 9; next steps 1, 2, 4 (HTTPS, human review of auth code), 5, 7. No real operator, device, host or counsel review. Agent-written code has had no human review. The score in Update 8 (18%) should not move on this work alone.
 **Shortcuts remaining:** Postgres pool is a fixed 1-10 connections (`app/db.py`); no token expiry warning in the UI; the rate-limit table grows one row per vehicle and is never pruned.
+
+### Update 11 (2026-10-13): agent self-review of auth and audit code, and fixes
+
+An agent reviewed the auth, token, audit and concurrency code (not a human review; gap "human review of auth code" stays open). Fixed: driver app froze `vehicle_id` after sign-in (pings went to the wrong vehicle after a new assignment); self token rotation could undo a revoke; connection not returned to the pool if rollback failed; migrations could race across workers on Postgres (advisory lock added, tested with 4 concurrent starters); pool creation race; token rotate, revoke and driver creation now write `auth_audit` rows (migration 0005, plus indexes on `missions(assigned_driver_id,status)` and `mission_audit(mission_id)`); text fields stripped and capped at 200 characters; queued pings cleared on sign-out.
+Added this round: console buttons to rotate and revoke driver tokens; token-expiry banner in the driver app (7 days); pools closed on shutdown; `docker-compose.yml`, `Caddyfile`, `backend/Dockerfile` and `docs/deploy.md` (UNTESTED: no Docker daemon was available); e2e now 37 checks.
+**Not fixed:** `GET /missions` has no pagination or limit; no request-body size limit at the proxy; "latest position" is ordered by the client timestamp, so a ping dated up to 60 s ahead can outrank real ones until then; vehicle and driver creation are not in `auth_audit`; an expired dispatcher token needs the bootstrap CLI.

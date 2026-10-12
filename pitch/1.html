@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambulance-AID-BD: a pilot proposal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Bengali:wght@400;600;700&display=swap">
+<style>
+:root{--green:#0b4f3c;--green2:#106b52;--red:#c8102e;--ink:#14201c;--mute:#51605a;--bg:#f6f4ee;--card:#fff;--line:#d9d6cb}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0c1512;overflow:hidden;font-family:Inter,"Noto Sans Bengali",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+.bn{font-family:"Noto Sans Bengali","Kohinoor Bangla","Bangla Sangam MN","Nirmala UI",Vrinda,sans-serif}
+#stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;transform-origin:0 0;background:var(--bg);overflow:hidden}
+.slide{position:absolute;inset:0;padding:64px 80px 70px;opacity:0;visibility:hidden;transition:opacity .35s}
+.slide.on{opacity:1;visibility:visible}
+.eyebrow{font-size:15px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-bottom:16px}
+h1{font-size:68px;line-height:1.05;font-weight:800;color:var(--green);letter-spacing:-.02em}
+h2{font-size:44px;line-height:1.12;font-weight:800;color:var(--green);letter-spacing:-.015em;max-width:1060px}
+p.lead{font-size:24px;line-height:1.45;color:var(--ink);margin-top:22px;max-width:980px}
+.grid{display:grid;gap:22px;margin-top:34px}
+.g3{grid-template-columns:repeat(3,1fr)}.g2{grid-template-columns:repeat(2,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;font-size:19px;line-height:1.4}
+.card b{display:block;font-size:21px;color:var(--green);margin-bottom:6px}
+.big{font-size:60px;font-weight:800;color:var(--red);line-height:1;letter-spacing:-.02em}
+.cap{font-size:18px;line-height:1.35;margin-top:10px}
+.src{font-size:12.5px;color:var(--mute);margin-top:10px;display:block}
+.tag{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:99px;background:#e8efe9;color:var(--green);vertical-align:middle}
+.tag.plan{background:#fbe5e8;color:var(--red)}
+ul.pts{list-style:none;margin-top:28px;max-width:1040px}
+ul.pts li{font-size:23px;line-height:1.4;padding:11px 0 11px 34px;position:relative;border-bottom:1px solid var(--line)}
+ul.pts li:before{content:"";position:absolute;left:4px;top:21px;width:14px;height:14px;border-radius:50%;background:var(--green)}
+ul.pts.red li:before{background:var(--red)}
+.dark{background:var(--green)}.dark h1,.dark h2,.dark .eyebrow{color:#fff}.dark .eyebrow{color:#ffb3bd}.dark p.lead,.dark ul.pts li{color:#fff;border-color:#2f7a65}
+.dark ul.pts li:before{background:#fff}
+.flow{display:flex;gap:6px;margin-top:40px;align-items:stretch}
+.flow div{flex:1;background:var(--card);border:1px solid var(--line);border-top:5px solid var(--green);border-radius:10px;padding:16px 10px;font-size:15px;font-weight:700;text-align:center;color:var(--green);display:flex;align-items:center;justify-content:center;min-height:84px}
+.flow div:last-child{border-top-color:var(--red)}
+.art{position:absolute;right:70px;bottom:78px}
+.stripe{position:absolute;left:0;top:0;bottom:0;width:14px;background:linear-gradient(var(--green) 0 70%,var(--red) 70%)}
+#bar{position:fixed;left:0;top:0;height:4px;background:var(--red);width:0;z-index:5;transition:width .3s}
+#ctr{position:fixed;right:14px;bottom:10px;color:#cfd8d3;font:600 13px Inter,sans-serif;z-index:5;background:#0008;padding:3px 9px;border-radius:99px}
+.nav{position:fixed;top:0;bottom:0;width:18%;z-index:4;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#prev{left:0}#next{right:0}
+.contact{font-size:30px;font-weight:700;border:2px dashed #fff;border-radius:14px;padding:24px 30px;margin-top:34px;display:inline-block}
+@media (prefers-reduced-motion:reduce){.slide,#bar{transition:none}}
+@media print{
+ @page{size:1280px 720px;margin:0}
+ html,body{overflow:visible;height:auto;background:#fff}
+ #stage{position:static;transform:none!important;width:1280px;height:auto;overflow:visible}
+ .slide{position:relative;opacity:1;visibility:visible;height:720px;break-after:page;page-break-after:always;transition:none}
+ #bar,#ctr,.nav{display:none}
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<script>
+/* ===== FILL IN BEFORE SENDING: one place for the contact line ===== */
+const CONTACT = "YOUR NAME · PHONE · EMAIL";
+/* ================================================================== */
+</script>
+
+<div id="bar"></div><div id="ctr"></div>
+<div class="nav" id="prev" aria-label="Previous slide"></div><div class="nav" id="next" aria-label="Next slide"></div>
+
+<div id="stage">
+
+<!-- 1 -->
+<section class="slide dark">
+ <div class="eyebrow">A pilot proposal for Bangladesh</div>
+ <h1 style="margin-top:50px;max-width:900px">Ambulance-AID-BD</h1>
+ <p class="lead" style="font-size:32px;max-width:860px">Faster dispatch and live visibility for ambulances, and next, fire trucks.</p>
+ <p class="lead bn" style="font-size:34px;font-weight:700;margin-top:34px">প্রতিটি মিনিট মূল্যবান</p>
+ <p class="lead" style="font-size:19px;margin-top:80px;color:#cfe3db">Working prototype. No operator yet. That is the reason for this note.</p>
+ <svg class="art" width="360" height="150" viewBox="0 0 360 150" role="img" aria-label="Ambulance and fire truck illustration">
+  <g>
+   <rect x="10" y="40" width="110" height="60" rx="6" fill="#fff"/><path d="M120 55h34l18 22v23h-52z" fill="#fff"/><path d="M130 62h20l12 15h-32z" fill="#9fc6b8"/>
+   <rect x="52" y="52" width="26" height="8" fill="#c8102e"/><rect x="61" y="43" width="8" height="26" fill="#c8102e"/>
+   <rect x="78" y="30" width="22" height="8" rx="3" fill="#c8102e"/>
+   <circle cx="45" cy="104" r="12" fill="#14201c"/><circle cx="145" cy="104" r="12" fill="#14201c"/><circle cx="45" cy="104" r="5" fill="#ccc"/><circle cx="145" cy="104" r="5" fill="#ccc"/>
+  </g>
+  <g transform="translate(190 0)">
+   <rect x="0" y="48" width="100" height="52" rx="5" fill="#c8102e"/><path d="M100 60h42l16 20v20h-58z" fill="#c8102e"/><path d="M110 66h24l12 14h-36z" fill="#ffd9de"/>
+   <rect x="8" y="34" width="84" height="8" rx="3" fill="#e9e9e9"/><rect x="14" y="56" width="70" height="6" fill="#fff" opacity=".7"/>
+   <circle cx="30" cy="104" r="12" fill="#14201c"/><circle cx="130" cy="104" r="12" fill="#14201c"/><circle cx="30" cy="104" r="5" fill="#ccc"/><circle cx="130" cy="104" r="5" fill="#ccc"/>
+  </g>
+ </svg>
+</section>
+
+<!-- 2 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">The problem</div>
+ <h2>The clock that matters starts at the call, not at the hospital.</h2>
+ <ul class="pts red">
+  <li>Minutes are lost between a call and a vehicle on scene, and nobody can see where.</li>
+  <li>Dispatchers work by phone and radio, without live vehicle positions.</li>
+  <li>There is no reliable record of who sent what, when, so nothing can be improved or held to account.</li>
+ </ul>
+</section>
+
+<!-- 3 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Why Bangladesh, why now</div>
+ <h2>The demand is large and already visible in public numbers.</h2>
+ <div class="grid g3">
+  <div class="card"><div class="big">7 km/h</div><div class="cap">Average driving speed in Dhaka, down from 21 km/h ten years earlier, in a World Bank analysis. Dated 2017; a newer figure is not verified.</div><span class="src">Source 1</span></div>
+  <div class="card"><div class="big">71.17m</div><div class="cap">Calls received by the 999 national emergency service since its launch in Dec 2017, to 30 April 2026. Service was provided on 31.74m of them.</div><span class="src">Source 2</span></div>
+  <div class="card"><div class="big">27,624</div><div class="cap">Fire incidents recorded by the Fire Service and Civil Defence in 2023, up from 24,102 in 2022.</div><span class="src">Source 3</span></div>
+ </div>
+</section>
+
+<!-- 4 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Why now</div>
+ <h2>The pieces are finally in place.</h2>
+ <div class="grid g2">
+  <div class="card"><b>A national call system exists</b>999 already brings emergencies in. What is thin is the dispatch-to-scene step, and the data on it.</div>
+  <div class="card"><b>Phones are already in drivers' hands</b>A low-end Android phone and a browser are enough. No special hardware.</div>
+  <div class="card"><b>Bangla first</b>The driver app works in Bangla and English, so the person on the road is not left out.</div>
+  <div class="card"><b>Dhaka will not get less crowded</b>Every minute of delay needs to be seen to be reduced.</div>
+ </div>
+</section>
+
+<!-- 5 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">What exists today <span class="tag">built</span></div>
+ <h2>A working dispatch and live-visibility system.</h2>
+ <div class="grid g3">
+  <div class="card"><b>Dispatcher console</b>Create, assign and cancel missions. See live vehicle positions and mission history.</div>
+  <div class="card"><b>Driver app (PWA)</b>Bangla and English. Runs on low-end phones. Offline queue: GPS pings wait and send when signal returns.</div>
+  <div class="card"><b>Full audit trail</b>Every status change records who, from which state, to which, and when.</div>
+  <div class="card"><b>Role-based access</b>Dispatchers manage. A driver can only touch the mission assigned to them.</div>
+  <div class="card"><b>Token control</b>Per-user hashed tokens. Rotate, revoke, and automatic 90-day expiry.</div>
+  <div class="card"><b>Runs on PostgreSQL</b>Automatic schema migrations and API contract tests. Not yet deployed.</div>
+ </div>
+</section>
+
+<!-- 6 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">How a mission runs</div>
+ <h2>One clear path from dispatch to hospital, every step on record.</h2>
+ <div class="flow">
+  <div>Dispatched</div><div>En route to pickup</div><div>At scene</div><div>Transporting patient</div><div>At hospital</div><div>Completed</div>
+ </div>
+ <p class="lead" style="font-size:21px">A mission can be cancelled before transport. Each move is logged, so the time between steps can be measured for the first time.</p>
+ <p class="lead" style="font-size:17px;color:var(--mute)">Step names and cancel rules are the developer's first choice and will be confirmed with a real dispatcher before any pilot.</p>
+</section>
+
+<!-- 7 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Next vehicle type <span class="tag plan">planned, not built</span></div>
+ <h2>Fire trucks run on the same engine.</h2>
+ <div class="grid g2">
+  <div class="card"><b>Same clock</b>Dispatch-to-scene time matters for a fire as much as for a patient.</div>
+  <div class="card"><b>Multi-vehicle incidents</b>One incident, several trucks and ambulances, tracked together.</div>
+  <div class="card"><b>Coordination</b>Stations, hydrants and hospitals in one view.</div>
+  <div class="card"><b>No rebuild</b>Missions, positions, roles and audit trail already exist; fire is the roadmap's second vehicle type.</div>
+ </div>
+</section>
+
+<!-- 8 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">What it can do for Bangladesh</div>
+ <h2>Goals the pilot will measure, not promises.</h2>
+ <div class="grid g3">
+  <div class="card"><b>Response time</b>Goal: shorten dispatch to acknowledge. Today there is no baseline; the pilot produces one.</div>
+  <div class="card"><b>Accountability</b>A complete, timestamped trail for every mission. This already works.</div>
+  <div class="card"><b>Data for planning</b>Where fleets wait, which routes are slow, how many missions are late.</div>
+  <div class="card"><b>Local software, local jobs</b>Built in Bangladesh, open source (Apache 2.0), no licence fee to a foreign vendor.</div>
+  <div class="card"><b>Low cost</b>Runs on phones operators already own. Pricing is not set; goal is to stay far below imported systems.</div>
+  <div class="card"><b>A base for more</b>Fire trucks, and one day links to 999, each only with written agreement.</div>
+ </div>
+</section>
+
+<!-- 9 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Safety and privacy</div>
+ <h2>Advisory only. Phone and radio always come first.</h2>
+ <ul class="pts">
+  <li>If the system is down, operators go straight back to phone and radio. A runbook is drafted.</li>
+  <li>Drivers are told in writing, in Bangla, what is tracked, and consent is recorded.</li>
+  <li>No patient names, vitals or caller numbers are collected in the pilot. Test data only until counsel has reviewed data-protection law.</li>
+  <li>No traffic-signal control exists. It would be considered only after written safety gates: authority agreement, engineer-signed safety case, security review.</li>
+ </ul>
+</section>
+
+<!-- 10 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">The pilot</div>
+ <h2>One fleet. Under 20 vehicles. Dispatch and visibility only.</h2>
+ <div class="grid g2">
+  <div class="card"><b>Proposed, to agree with the operator</b>8 weeks, compared with the operator's own records.<br>Missions recorded: at least 90% of those actually run.<br>Complete status trail: at least 80% of missions.<br>Vehicle pings on at least 90% of missions.</div>
+  <div class="card"><b>Also measured</b>Median dispatch-to-acknowledge time, reported as measured.<br>Dispatchers: faster or equal to phone and radio?<br>Serious incidents caused by the tool: zero.<br>Would the operator continue?</div>
+ </div>
+ <p class="lead" style="font-size:20px">Failure is a valid result and will be published.</p>
+</section>
+
+<!-- 11 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Honest status</div>
+ <h2>A working prototype with no operator. That is the ask.</h2>
+ <div class="grid g2">
+  <div class="card"><b>True today</b>Tested in simulation and in headless browsers. Backend tests pass on PostgreSQL. Code is open source.</div>
+  <div class="card"><b>Not yet true</b>No real vehicles, phones in motion, users, partner, legal opinion, or deployment. No measured results.</div>
+ </div>
+ <p class="lead" style="font-size:21px">Software alone cannot close this gap. One operator and one introduction can.</p>
+</section>
+
+<!-- 12 -->
+<section class="slide dark">
+ <div class="eyebrow">The ask</div>
+ <h2>Three things that are easy to grant.</h2>
+ <ul class="pts">
+  <li><b>One introduction</b> to a fleet operator or a fire station willing to host a small pilot.</li>
+  <li><b>One named point of contact</b> who can say yes or no and answer questions.</li>
+  <li><b>Guidance</b> on data-protection compliance for location data of drivers and vehicles.</li>
+ </ul>
+ <p class="lead" style="font-size:20px">Nothing here needs a budget, a procurement, or a policy change.</p>
+</section>
+
+<!-- 13 -->
+<section class="slide dark">
+ <div class="eyebrow">Let us talk</div>
+ <h1 style="font-size:56px">Fifteen minutes, one fleet, one pilot.</h1>
+ <div class="contact" id="contact"></div>
+ <p class="lead bn" style="font-size:28px;margin-top:40px">প্রতিটি মিনিট মূল্যবান</p>
+</section>
+
+<!-- 14 -->
+<section class="slide"><div class="stripe"></div>
+ <div class="eyebrow">Sources</div>
+ <h2 style="font-size:34px">Every number on these slides, and where to check it.</h2>
+ <ol style="margin:22px 0 0 24px;font-size:15.5px;line-height:1.5;max-width:1100px;word-break:break-all">
+  <li><b>1.</b> The Daily Star, 19 Jul 2017, World Bank: Dhaka speed 21 to 7 km/h; 3.2m working hours lost per day.<br>https://www.thedailystar.net/city/dhaka-traffic-jam-congestion-eats-32-million-working-hours-everyday-world-bank-1435630</li>
+  <li style="margin-top:8px"><b>2.</b> Dhaka Tribune, 16 May 2026: 999 received 71.17m calls to 30 Apr 2026; service on 31.74m.<br>https://www.dhakatribune.com/bangladesh/government-affairs/410362/fake-unnecessary-calls-delay-999-emergency</li>
+  <li style="margin-top:8px"><b>3.</b> Dhaka Tribune, 28 Mar 2024, citing Fire Service and Civil Defence: 24,102 fires in 2022; 27,624 in 2023.<br>https://www.dhakatribune.com/bangladesh/342889/why-are-fire-incidents-increasing-in-bangladesh</li>
+  <li style="margin-top:8px"><b>Project facts</b> (README, docs/pilot-plan.md, docs/roadmap.md): github repository, Apache 2.0. Pilot thresholds are proposals, not agreed.</li>
+ </ol>
+</section>
+
+</div>
+
+<script>
+const slides=[...document.querySelectorAll('.slide')],stage=document.getElementById('stage');
+document.getElementById('contact').textContent=CONTACT;
+let i=0;
+const h=location.hash.match(/\d+/);if(h)i=Math.min(slides.length-1,Math.max(0,h[0]-1));
+function show(n){i=Math.min(slides.length-1,Math.max(0,n));
+ slides.forEach((s,k)=>s.classList.toggle('on',k===i));
+ document.getElementById('bar').style.width=((i+1)/slides.length*100)+'%';
+ document.getElementById('ctr').textContent=(i+1)+' / '+slides.length;
+ try{history.replaceState(null,'','#'+(i+1))}catch(e){}}
+function fit(){const s=Math.min(innerWidth/1280,innerHeight/720);
+ stage.style.transform='scale('+s+') translate(-50%,-50%)';
+ stage.style.transformOrigin='0 0';
+ stage.style.left='50%';stage.style.top='50%';
+ // translate in unscaled px of the stage; scale applied first on the left of the list
+ stage.style.transform='translate(-'+(640*s)+'px,-'+(360*s)+'px) scale('+s+')';}
+addEventListener('resize',fit);fit();
+addEventListener('keydown',e=>{
+ if(['ArrowRight','ArrowDown','PageDown',' ','Enter'].includes(e.key)){e.preventDefault();show(i+1)}
+ else if(['ArrowLeft','ArrowUp','PageUp','Backspace'].includes(e.key)){e.preventDefault();show(i-1)}
+ else if(e.key==='Home')show(0);else if(e.key==='End')show(slides.length-1)});
+document.getElementById('next').onclick=()=>show(i+1);
+document.getElementById('prev').onclick=()=>show(i-1);
+let sx=null;
+addEventListener('touchstart',e=>{sx=e.touches[0].clientX},{passive:true});
+addEventListener('touchend',e=>{if(sx===null)return;const d=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(d)>40)show(i+(d<0?1:-1))});
+show(i);
+</script>
+</body>
+</html>

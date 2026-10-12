@@ -56,3 +56,19 @@ def test_upgrade_0003_to_0004_backfills_expiry(tmp_path):
     db.commit(); db.close()
     migrate(p)
     assert sqlite3.connect(p).execute("SELECT token_expires_at FROM users").fetchone()[0] > "2026"
+
+
+def test_concurrent_migrate_on_postgres():
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        import pytest
+        pytest.skip("needs TEST_DATABASE_URL")
+    import psycopg
+    with psycopg.connect(url, autocommit=True) as c:
+        c.execute("DROP SCHEMA public CASCADE"); c.execute("CREATE SCHEMA public")
+    with ThreadPoolExecutor(4) as ex:  # four workers booting at once
+        list(ex.map(lambda _: migrate(url), range(4)))
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0005"

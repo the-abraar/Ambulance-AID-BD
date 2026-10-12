@@ -1,0 +1,6 @@
+tests
+.e2e
+*.db
+__pycache__
+.pytest_cache
+.venv

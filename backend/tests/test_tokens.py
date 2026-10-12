@@ -74,3 +74,34 @@ def test_token_expiry(env):
     r = c.post(f"/drivers/{env['drv']}/token/rotate", headers=env["D"])  # rotate renews an expired driver
     assert r.status_code == 200 and r.json()["expires_at"] > "2026"
     assert c.get("/me", headers=bearer(r.json()["token"])).status_code == 200
+
+
+def test_self_rotate_cannot_undo_revoke(env):
+    c = env["c"]
+    c.post(f"/drivers/{env['drv']}/token/revoke", headers=env["D"])
+    assert c.post("/me/token/rotate", headers=env["V"]).status_code == 401  # revoked token is dead
+    # the race: the caller passed auth, then the revoke landed; the guarded UPDATE must refuse
+    uid = env["db"].execute("SELECT user_id FROM drivers WHERE id=?", (env["drv"],)).fetchone()[0]
+    cur = env["db"].execute("UPDATE users SET token_hash='x' WHERE id=? AND revoked_at IS NULL", (uid,))
+    assert cur.rowcount == 0
+
+
+def test_auth_audit_records_actor_and_action(env):
+    c, db = env["c"], env["db"]
+    c.post("/drivers", json={"name": "z"}, headers=env["D"])
+    c.post(f"/drivers/{env['drv']}/token/rotate", headers=env["D"])
+    c.post(f"/drivers/{env['drv']}/token/revoke", headers=env["D"])
+    c.post("/me/token/rotate", headers=env["D"])
+    rows = [(r["action"]) for r in db.execute("SELECT action FROM auth_audit ORDER BY id")]
+    assert rows == ["create_driver", "rotate", "revoke", "rotate"]
+    assert db.execute("SELECT COUNT(*) FROM auth_audit WHERE actor_id IS NULL").fetchone()[0] == 0
+
+
+def test_text_fields_capped_and_stripped(env):
+    c, D = env["c"], env["D"]
+    assert c.post("/missions", json={"pickup_address": "   "}, headers=D).status_code == 422
+    assert c.post("/missions", json={"pickup_address": "x" * 201}, headers=D).status_code == 422
+    assert c.post("/drivers", json={"name": " " * 3}, headers=D).status_code == 422
+    assert c.post("/vehicles", json={"operator": "o" * 201, "registration": "R"}, headers=D).status_code == 422
+    r = c.post("/missions", json={"pickup_address": "  Mirpur  "}, headers=D)
+    assert r.json()["pickup_address"] == "Mirpur"

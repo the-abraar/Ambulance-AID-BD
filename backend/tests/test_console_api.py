@@ -20,7 +20,7 @@ def test_driver_forbidden(env, method, path):
 def test_me(env):
     c = env["c"]
     d = c.get("/me", headers=env["D"]).json()
-    assert d["role"] == "dispatcher" and "driver_id" not in d
+    assert d["role"] == "dispatcher" and "driver_id" not in d and d["token_expires_at"] > "2026"
     v = c.get("/me", headers=env["V"]).json()
     assert v["role"] == "driver" and v["driver_id"] == env["drv"] and v["vehicle_id"] is None
     mk(env)

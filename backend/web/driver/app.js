@@ -7,13 +7,15 @@ const T = {
     confirm: 'নিশ্চিত করুন', yes: 'হ্যাঁ', no: 'না', ok: 'অবস্থা আপডেট হয়েছে',
     e401: 'টোকেন বাতিল বা ভুল। আবার প্রবেশ করুন।', e409: 'মিশন বদলে গেছে। রিফ্রেশ করুন।', e429: 'অনুরোধ খুব দ্রুত। একটু পরে চেষ্টা করুন।',
     offline: 'অফলাইন। অবস্থা পরিবর্তন করা যাবে না; লোকেশন সংরক্ষিত হচ্ছে।', eStatus: 'অবস্থা পরিবর্তন ব্যর্থ। আবার চেষ্টা করুন।', eNet: 'সার্ভারে পৌঁছানো যায়নি।',
-    gpsDenied: 'জিপিএস অনুমতি নেই। ব্রাউজার সেটিংসে অনুমতি দিন।', gpsOff: 'জিপিএস পাওয়া যাচ্ছে না।', gpsNo: 'এই ডিভাইসে জিপিএস নেই।', queued: 'সংরক্ষিত পিং'},
+    gpsDenied: 'জিপিএস অনুমতি নেই। ব্রাউজার সেটিংসে অনুমতি দিন।', gpsOff: 'জিপিএস পাওয়া যাচ্ছে না।', gpsNo: 'এই ডিভাইসে জিপিএস নেই।', queued: 'সংরক্ষিত পিং',
+    expSoon: 'আপনার টোকেনের মেয়াদ ৭ দিনের মধ্যে শেষ হবে। ডিসপ্যাচারের কাছ থেকে নতুন টোকেন নিন।'},
   en: {title: 'Driver', lang: 'বাংলা', token: 'Access token', login: 'Sign in', logout: 'Sign out', refresh: 'Refresh',
     none: 'No mission', mission: 'Current mission', status: 'Status', pickup: 'Pickup', navigate: 'Navigate', next: 'Next step', noNext: 'No further steps',
     confirm: 'Confirm', yes: 'Yes', no: 'No', ok: 'Status updated',
     e401: 'Token invalid or revoked. Sign in again.', e409: 'Mission changed. Refresh.', e429: 'Too many requests. Try again shortly.',
     offline: 'Offline. Status changes unavailable; locations are being saved.', eStatus: 'Status change failed. Try again.', eNet: 'Cannot reach server.',
-    gpsDenied: 'GPS permission denied. Allow location in browser settings.', gpsOff: 'GPS unavailable.', gpsNo: 'No GPS on this device.', queued: 'Queued pings'},
+    gpsDenied: 'GPS permission denied. Allow location in browser settings.', gpsOff: 'GPS unavailable.', gpsNo: 'No GPS on this device.', queued: 'Queued pings',
+    expSoon: 'Your token expires within 7 days. Ask the dispatcher for a new one.'},
 };
 const SL = {
   bn: {DISPATCHED: 'প্রেরিত', EN_ROUTE_PICKUP: 'পিকআপের পথে', AT_SCENE: 'ঘটনাস্থলে', TRANSPORTING_PATIENT: 'রোগী নিয়ে যাচ্ছি', AT_HOSPITAL: 'হাসপাতালে পৌঁছেছি', COMPLETED: 'সম্পন্ন', CANCELLED: 'বাতিল'},
@@ -40,6 +42,7 @@ async function api(method, path, body) {
   return r;
 }
 function signOut(expired) {
+  try { localStorage.removeItem(QK); } catch (e) {} // queued pings belong to this driver's vehicle
   token = ''; me = null; mission = null; stopGps();
   try { sessionStorage.removeItem('tok'); } catch (e) {}
   render(); if (expired) sayT('auth', 'e401', true);
@@ -95,15 +98,14 @@ const active = () => mission && !DONE.includes(mission.status);
 async function load() {
   if (!token) return;
   try {
-    if (!me) {
-      const r = await api('GET', '/me'); if (!r.ok) return;
-      me = await r.json();
-    }
+    const r = await api('GET', '/me'); if (!r.ok) return; // every load: the vehicle can change between missions
+    me = await r.json();
     const m = await api('GET', '/missions/current');
     if (m.status === 404) mission = null; else if (m.ok) mission = await m.json(); else return;
     const tr = await api('GET', '/meta/transitions');
     if (tr.ok) trans = await tr.json();
     sayT('net', '');
+    sayT('exp', Date.parse(me.token_expires_at) - Date.now() < 7 * 864e5 ? 'expSoon' : '', true);
   } catch (e) { sayT('net', navigator.onLine ? 'eNet' : 'offline', true); }
   active() ? startGps() : stopGps();
   render();

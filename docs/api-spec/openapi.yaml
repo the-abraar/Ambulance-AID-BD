@@ -468,6 +468,7 @@ components:
       properties:
         role: {type: string, enum: [dispatcher, driver]}
         user_id: {type: string}
+        token_expires_at: {type: [string, "null"], format: date-time}
         driver_id: {type: string}
         vehicle_id: {type: [string, "null"]}
 
