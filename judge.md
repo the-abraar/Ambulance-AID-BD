@@ -282,3 +282,12 @@ Audited: 2026-10-12, single commit `5360cf1` ("docs: initial architecture..."). 
 5. **You:** verify Bangladesh data-protection requirements with counsel; get drivers' written consent text approved.
 6. **Code:** cover offline replay, denied GPS and the 429 state in the e2e; shorten the mission ID on the driver card; add a down-time runbook.
 7. **Only after a pilot works:** revisit the FUTURE items; signals stay out until the written gates in the roadmap are met.
+
+### Update 9 (2026-10-12, stopped at the 70% usage ceiling)
+
+**Done this round:** retro guardrails (`scripts/check.sh`, pre-commit hook `.githooks/pre-commit`, CI workflow, `AGENTS.md`, `CODING_STANDARDS.md`); orphaned worktrees removed (Suggest.Bike); all work committed and pushed to `origin/main`. Usage mirror `../usage.md` is live (status line writes the 5-hour and 7-day percentages); read it before starting a round.
+
+**I was in the middle of:** nothing half-done. The last action was this log. No uncommitted work remains apart from this file.
+
+**Not verified:** the GitHub CI workflows have never run; the pre-commit hook has never blocked a real commit; no real-device, real-user or real-host testing.
+**Next, first:** one fleet operator for a pilot; run the driver app on a real phone with real GPS; see Update 8.
