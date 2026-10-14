@@ -139,13 +139,22 @@ const active = () => !!mission && !DONE.includes(mission.status);
 
 // ---- what a live mission needs: tracking (web or native), screen on, alert until accepted
 function track() {
-  const live = !!token && active(), on = live && !!me.vehicle_id, N = window.AmbulanceNative;
+  const live = !!token && active(), on = live && !!me.vehicle_id;
   sayT('veh', live && !on ? 'noVeh' : '', true); // B7: never ping /vehicles/null
   keepAwake(live); alerting(live && !mission.acknowledged_at);
-  if (N) { // wrapper: its foreground service pings, so the web GPS watch stays off and the server never gets both
-    const k = on ? JSON.stringify({baseUrl: location.origin, token, vehicleId: me.vehicle_id, missionId: mission.mission_id}) : '';
-    if (k !== nativeKey) try { if (k) N.startTracking(k); else if (N.isTracking()) N.stopTracking(); nativeKey = k; } catch (e) {}
-  } else if (on) { startGps(); replay(); } else stopGps();
+  if (nativeTrack(on)) stopGps(); // the wrapper's service pings, so the web watch stays off and the server never gets both
+  else if (on) { startGps(); replay(); } else stopGps();
+}
+function nativeTrack(on) { // Android wrapper; isTracking() is the truth, since its service can stop itself
+  const N = window.AmbulanceNative;
+  if (!N) return false;
+  try {
+    if (!on) { if (N.isTracking()) N.stopTracking(); nativeKey = ''; return false; }
+    const k = JSON.stringify({baseUrl: location.origin, token, vehicleId: me.vehicle_id, missionId: mission.mission_id});
+    if (N.isTracking() && (nativeKey === null || nativeKey === k)) { nativeKey = k; return true; } // first load: adopt it
+    nativeKey = N.startTracking(k) === true ? k : ''; // false (e.g. baseUrl refused): the web path takes over
+    return !!nativeKey;
+  } catch (e) { return false; }
 }
 function keepAwake(on) { // the browser drops the lock whenever the page is hidden, so visibilitychange asks again
   if (on && !wake && navigator.wakeLock && document.visibilityState === 'visible') {
@@ -273,6 +282,7 @@ $('lang').onclick = () => { lang = lang === 'bn' ? 'en' : 'bn'; try { localStora
 addEventListener('online', () => { sayT('net', ''); load(); }); // load() replays once me and mission are fresh (B9)
 addEventListener('offline', () => sayT('net', 'offline', true));
 addEventListener('hashchange', fromHash);
+addEventListener('ambulance-native-stopped', () => load()); // 401: /me answers 401 and routes to re-pairing; 403/404: shows the ended mission
 addEventListener('pointerdown', armAudio);
 document.addEventListener('visibilitychange', () => keepAwake(!!token && active()));
 setInterval(() => { if (token && navigator.onLine) load(); }, 15000);

@@ -48,13 +48,16 @@ window.Notification = class { constructor(t, o) { __al.notes.push(t + ': ' + o.b
 Object.defineProperty(navigator, 'wakeLock', {value: {request: async () => { __al.wake++;
   const s = {onrelease: null, release: async () => { __al.wake--; s.onrelease && s.onrelease(); }}; return s; }}});
 """
-# The Android wrapper's contract: window.AmbulanceNative with startTracking(json), stopTracking(), isTracking().
+# The Android wrapper's contract: window.AmbulanceNative with startTracking(json) -> bool, stopTracking(), isTracking(),
+# and an `ambulance-native-stopped` event {status, reason} when its service stops itself (401, 403, 404).
 BRIDGE = """
-window.__calls = []; window.__watches = 0;
+window.__calls = []; window.__watches = 0; window.__nativeFail = false;
 const _w = navigator.geolocation.watchPosition.bind(navigator.geolocation);
 navigator.geolocation.watchPosition = (...a) => { __watches++; return _w(...a); };
-window.AmbulanceNative = {on: false, startTracking(j) { __calls.push(['start', JSON.parse(j)]); this.on = true; },
+window.AmbulanceNative = {on: false, startTracking(j) { __calls.push(['start', JSON.parse(j)]); return (this.on = !__nativeFail); },
   stopTracking() { __calls.push(['stop']); this.on = false; }, isTracking() { return this.on; }};
+window.__nativeStop = status => { AmbulanceNative.on = false;
+  dispatchEvent(new CustomEvent('ambulance-native-stopped', {detail: {status, reason: 'e2e'}})); };
 """
 checks = 0
 
@@ -618,24 +621,44 @@ def bridge_checks(b, base, atok, page_in):
        "B15: Bangla 'cancelled by dispatcher' card; bridge: stopTracking")
     shot(k, "driver_360_cancelled.png", "driver app 360x740, Bangla 'cancelled by dispatcher' card")
 
-    # B8: a revoked token routes to re-pairing and keeps the queued pings
+    # startTracking answers false (e.g. it refused the baseUrl): the web GPS path pings instead, until native works again
+    def web_pinged():
+        try:
+            return api(base, atok, f"/vehicles/{vid}/position")["lat"] == 23.87
+        except urllib.error.HTTPError:
+            return False
+    k.evaluate("__nativeFail = true"); m8 = mission("Uttara-8")
+    k.click("#rf"); k.wait_for_selector("#ack")
+    wait_until(lambda: k.evaluate("__watches") == 1 and web_pinged(), "bridge: startTracking false falls back to the web GPS watch, which pings")
+    k.evaluate("__nativeFail = false"); k.click("#rf")
+    wait_until(lambda: k.evaluate("watchId === null && AmbulanceNative.on"), "bridge: once startTracking succeeds the web watch stops")
+    # the wrapper's service stops itself because the mission ended (403/404): its event makes the app reload
+    call(base, "PATCH", f"/missions/{m8}/status", atok, {"status": "CANCELLED", "reason": "e2e"})
+    k.evaluate("__nativeStop(404)"); k.wait_for_selector(".card.ended")
+    ok("ডিসপ্যাচার মিশনটি বাতিল করেছেন" in k.inner_text("#app"), "ambulance-native-stopped 404: the app reloads and shows the cancelled mission")
+
+    # B8: the token is revoked mid-mission; the service gets 401 and stops itself; re-pairing keeps the queued pings
+    m9 = mission("Uttara-9")
+    k.click("#rf"); k.wait_for_selector("#ack")
     k.evaluate("localStorage.setItem('driver_ping_queue', JSON.stringify([{lat: 23.87, lng: 90.4, ts: new Date().toISOString(), vehicle_id: 'v', mission_id: 'm'}]))")
     call(base, "POST", f"/drivers/{kid}/token/revoke", atok)
-    k.click("#rf"); k.wait_for_selector("#code")
+    k.evaluate("__nativeStop(401)"); k.wait_for_selector("#code")
     ok("নতুন ৬ সংখ্যার কোড" in k.inner_text("#status") and len(k.evaluate("JSON.parse(localStorage.getItem('driver_ping_queue'))")) == 1,
-       "B8: a revoked token routes to the pairing form and keeps the queue")
+       "B8: ambulance-native-stopped 401 routes to the pairing form and keeps the queue")
     shot(k, "driver_360_repair.png", "driver app 360x740, Bangla 'signed out, get a new code' message on the pairing form")
-    k.fill("#code", code()); k.click("#f button"); k.wait_for_selector("#rf")
-    mission("Uttara-9")
-    k.click("#rf"); k.wait_for_selector("#ack")
-    ok(calls()[-1][0] == "start" and calls()[-1][1]["token"] == tok(), "typed code signs the revoked driver back in; tracking restarts")
+    k.fill("#code", code()); k.click("#f button"); k.wait_for_selector("#ack")
+    ok(calls()[-1][0] == "start" and calls()[-1][1]["token"] == tok() and calls()[-1][1]["missionId"] == m9,
+       "typed code signs the revoked driver back in; native tracking restarts with the new token")
+    k.reload(); k.wait_for_selector("#ack")  # WebView restarted, service not running
+    ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": m9}]],
+       "after a reload with an active mission and native tracking off, startTracking on load")
 
     k.click("#lo"); k.click("dialog button[data-v='']")
     ok(tok() and k.is_visible("#ack"), "sign-out asks first; 'No' keeps the driver signed in")
     k.click("#lo"); k.click("dialog button[data-v='1']"); k.wait_for_selector("#code")
     ok(calls()[-1] == ["stop"] and tok() is None and k.evaluate("localStorage.getItem('driver_ping_queue')") is None,
        "confirmed sign-out stops native tracking and clears token and queue")
-    ok(k.evaluate("__watches") == 0, "bridge: the web GPS watch never ran, so the server never gets double pings")
+    ok(k.evaluate("__watches") == 0, "bridge: since the reload the web GPS watch never ran, so no double pings")
     ctx.close()
 
 

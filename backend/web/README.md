@@ -91,10 +91,14 @@ shell, never API calls. Bump its cache name `C` whenever you change a cached fil
   polls `/me` and `/missions/current` every 15 s and fetches `/meta/transitions` once.
 - **Server feedback:** if a ping's `clock_skew_s` is over 60, the app tells the driver to fix the phone clock (tracking
   still works). For 10 minutes after a mission ends, the app shows "Cancelled by dispatcher" or "Mission completed".
-- **Android wrapper:** when `window.AmbulanceNative` exists, the app calls
-  `startTracking(JSON.stringify({baseUrl, token, vehicleId, missionId}))` when a mission becomes active, and again
-  when the token rotates. It calls `stopTracking()` (if `isTracking()`) when the mission ends or is cancelled, and on
-  sign-out or a 401. The web GPS watch then never runs, so the server never gets two pings for one fix.
+- **Android wrapper:** when `window.AmbulanceNative` exists and a mission is active with a vehicle, the app calls
+  `startTracking(JSON.stringify({baseUrl: location.origin, token, vehicleId, missionId}))`. It calls it again when the
+  token or mission changes, and on page load when `isTracking()` is false (a running service is adopted as is).
+  While the service runs, the web GPS watch stays off, so the server never gets two pings for one fix. If
+  `startTracking` returns false (for example, it refused the `baseUrl`), the web path pings instead and the app retries
+  native on the next poll. `stopTracking()` runs (if `isTracking()`) when the mission ends or is cancelled, and on
+  sign-out or a 401. When the service stops itself, its `ambulance-native-stopped` event makes the app reload: a 401
+  then routes to re-pairing, and a 403/404 shows the ended mission.
 - **Language:** Bangla by default, with a toggle for English. Unknown statuses show the raw status name, escaped.
   Navigate opens Google Maps, built only from the numeric pickup coordinates.
 
