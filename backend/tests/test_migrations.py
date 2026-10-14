@@ -71,4 +71,4 @@ def test_concurrent_migrate_on_postgres():
     with ThreadPoolExecutor(4) as ex:  # four workers booting at once
         list(ex.map(lambda _: migrate(url), range(4)))
     with psycopg.connect(url) as c:
-        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0005"
+        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0006"

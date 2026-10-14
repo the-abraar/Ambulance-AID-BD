@@ -40,5 +40,10 @@ def transition(src: State, dst: State) -> State:
 
 
 def required_role(dst: State) -> str:
-    """The one authorization rule: only dispatchers cancel; only drivers advance. Used by PATCH and /meta/transitions."""
+    """The one authorization rule: only dispatchers cancel; drivers advance. Used by PATCH and /meta/transitions."""
     return "dispatcher" if dst is State.CANCELLED else "driver"
+
+
+def on_behalf(role: str, dst: State) -> bool:
+    """A dispatcher may make the driver's move for them (dead phone, back-fill after an outage); PATCH then needs a reason."""
+    return role == "dispatcher" and required_role(dst) == "driver"

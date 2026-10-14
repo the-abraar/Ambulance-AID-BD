@@ -19,13 +19,16 @@ def env(target):
     # second connection to the same file just for seeding; commit makes it visible
     from app.db import connect
     db = connect(target)
-    did, dt = add_user(db, "disp", "dispatcher")
+    did, dt = add_user(db, "disp", "dispatcher", admin=True)
+    pid, pt = add_user(db, "plain", "dispatcher")
     drv, vt = add_user(db, "drv1", "driver")
     drv2, vt2 = add_user(db, "drv2", "driver")
     veh = add_vehicle(db, "Op", "DHK-1")
     veh2 = add_vehicle(db, "Op", "DHK-2")
+    db.commit()
     h = lambda t: {"Authorization": f"Bearer {t}"}
-    return dict(c=c, app=app, db=db, D=h(dt), V=h(vt), V2=h(vt2), drv=drv, veh=veh, veh2=veh2, path=target)
+    return dict(c=c, app=app, db=db, D=h(dt), P=h(pt), V=h(vt), V2=h(vt2), drv=drv, drv2=drv2, veh=veh, veh2=veh2,
+                did=did, pid=pid, path=target)
 
 
 def mk(e, **kw):
@@ -33,6 +36,15 @@ def mk(e, **kw):
     r = e["c"].post("/missions", json=body, headers=e["D"])
     assert r.status_code == 201, r.text
     return r.json()["mission_id"]
+
+
+def free(e):
+    """End every active mission in the DB, so the next mk() may reuse the same vehicle and driver."""
+    e["db"].execute("UPDATE missions SET status='CANCELLED' WHERE status NOT IN ('COMPLETED','CANCELLED')")
+    e["db"].commit()
+
+
+DHAKA = {"lat": 23.8103, "lng": 90.4125}
 
 
 def test_auth_required(env):
@@ -73,7 +85,8 @@ def test_roles_binding_and_invalid(env):
     assert c.get(f"/missions/{m}", headers=V2).status_code == 403
     assert c.patch(p, json={"status": "AT_SCENE"}, headers=V).status_code == 409
     assert c.patch(p, json={"status": "CANCELLED"}, headers=V).status_code == 403
-    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP"}, headers=D).status_code == 403
+    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP"}, headers=D).status_code == 422  # on-behalf needs a reason
+    assert c.patch(p, json={"status": "CANCELLED", "notes": "x"}, headers=D).status_code == 422  # notes removed
     assert c.patch(p, json={"status": "CANCELLED"}, headers=D).status_code == 200
     assert c.patch(p, json={"status": "BOGUS"}, headers=V).status_code == 422
     assert c.get("/missions/not-a-uuid", headers=D).status_code == 404
@@ -92,7 +105,7 @@ def test_assignment_validation(env):
 
 def test_list_missions(env):
     c, D, V = env["c"], env["D"], env["V"]
-    a, b = mk(env), mk(env)
+    a, b = mk(env, assigned_vehicle_id=env["veh2"], assigned_driver_id=env["drv2"]), mk(env)
     c.patch(f"/missions/{b}/status", json={"status": "EN_ROUTE_PICKUP"}, headers=V)
     assert {x["mission_id"] for x in c.get("/missions", headers=D).json()} == {a, b}
     assert [x["mission_id"] for x in c.get("/missions?status=EN_ROUTE_PICKUP", headers=D).json()] == [b]
@@ -107,13 +120,23 @@ def test_list_missions(env):
     ({"lat": 23.8, "lng": 90.4, "ts": "yesterday"}, 422),
     ({"lat": 23.8, "lng": 90.4, "ts": "2026-10-12T10:00:00"}, 422),
     ({"lat": 23.8, "lng": 90.4}, 422),
-    ({"lat": 23.8, "lng": 90.4, "ts": "STALE"}, 422),
-    ({"lat": 23.8, "lng": 90.4, "ts": "FUTURE"}, 422),
+    ({"lat": 23.8, "lng": 90.4, "ts": "STALE"}, 201),  # skewed phone clocks are accepted (B4)
+    ({"lat": 23.8, "lng": 90.4, "ts": "FUTURE"}, 201),
+    ({"lat": 0, "lng": 0, "ts": "NOW"}, 422),
 ])
 def test_ping(env, body, code):
     mk(env)
     body = {**body, **({"ts": {"NOW": iso(), "STALE": iso(hours=-1), "FUTURE": iso(hours=1)}[body["ts"]]} if body.get("ts") in ("NOW", "STALE", "FUTURE") else {})}
     assert env["c"].post(f"/vehicles/{env['veh']}/pings", json=body, headers=env["V"]).status_code == code
+
+
+def test_nan_body_is_422_not_500(env):
+    mk(env)
+    for path, raw in ((f"/vehicles/{env['veh']}/pings", '{"lat": NaN, "lng": 90.4, "ts": "%s"}' % iso()),
+                      ("/missions", '{"pickup_address": "x", "pickup_lat": NaN, "pickup_lng": 1}')):
+        r = env["c"].post(path, content=raw, headers={**(env["V"] if "pings" in path else env["D"]),
+                                                      "content-type": "application/json"})
+        assert r.status_code == 422 and "input" not in r.text, r.text
 
 
 def test_ping_auth_and_binding(env):
@@ -136,10 +159,10 @@ def test_ping_rate_limit_and_position(env):
     mk(env)
     v = env["veh"]
     assert c.get(f"/vehicles/{v}/position", headers=env["D"]).status_code == 404
-    assert c.post(f"/vehicles/{v}/pings", json={"lat": 1, "lng": 2, "ts": iso()}, headers=env["V"]).status_code == 201
-    assert c.post(f"/vehicles/{v}/pings", json={"lat": 3, "lng": 4, "ts": iso()}, headers=env["V"]).status_code == 429
+    assert c.post(f"/vehicles/{v}/pings", json={"lat": 23.81, "lng": 90.41, "ts": iso()}, headers=env["V"]).status_code == 201
+    assert c.post(f"/vehicles/{v}/pings", json={"lat": 23.811, "lng": 90.41, "ts": iso()}, headers=env["V"]).status_code == 429
     r = c.get(f"/vehicles/{v}/position", headers=env["D"])
-    assert r.status_code == 200 and (r.json()["lat"], r.json()["lng"]) == (1, 2)
+    assert r.status_code == 200 and (r.json()["lat"], r.json()["lng"]) == (23.81, 90.41)
     assert c.get(f"/vehicles/{v}/position", headers=env["V"]).status_code == 403
 
 
@@ -166,8 +189,8 @@ def test_terminal_state_not_overwritten(env):
 
 def test_missions_pagination(env):
     c, D = env["c"], env["D"]
-    ids = [mk(env) for _ in range(3)]
-    assert [m["mission_id"] for m in c.get("/missions", headers=D).json()] == ids
+    ids = [c.post("/missions", json={"pickup_address": f"x{i}"}, headers=D).json()["mission_id"] for i in range(3)][::-1]
+    assert [m["mission_id"] for m in c.get("/missions", headers=D).json()] == ids  # newest first
     assert [m["mission_id"] for m in c.get("/missions?limit=2&offset=1", headers=D).json()] == ids[1:]
     for q in ("limit=0", "limit=501", "offset=-1"):
         assert c.get(f"/missions?{q}", headers=D).status_code == 422
@@ -176,9 +199,9 @@ def test_missions_pagination(env):
 def test_future_ping_clamped_to_receive_time(env):
     c = env["c"]
     mk(env)
-    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 1, "lng": 1, "ts": iso(seconds=50)}, headers=env["V"]).status_code == 201
-    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 2, "lng": 2, "ts": iso()}, headers=env["V"]).status_code == 201
-    assert c.get(f"/vehicles/{env['veh']}/position", headers=env["D"]).json()["lat"] == 2
+    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 23.81, "lng": 90.41, "ts": iso(seconds=50)}, headers=env["V"]).status_code == 201
+    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 23.811, "lng": 90.41, "ts": iso()}, headers=env["V"]).status_code == 201
+    assert c.get(f"/vehicles/{env['veh']}/position", headers=env["D"]).json()["lat"] == 23.811
 
 
 def test_vehicle_create_audited_and_prune_and_body_cap(env):
