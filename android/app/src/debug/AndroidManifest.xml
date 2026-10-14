@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug only: plain HTTP to the emulator's host alias. Release has no config, so cleartext is refused. -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>
