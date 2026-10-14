@@ -312,3 +312,15 @@ Edited at the user's explicit request (`AGENTS.md` otherwise says not to edit th
 An agent reviewed the auth, token, audit and concurrency code (not a human review; gap "human review of auth code" stays open). Fixed: driver app froze `vehicle_id` after sign-in (pings went to the wrong vehicle after a new assignment); self token rotation could undo a revoke; connection not returned to the pool if rollback failed; migrations could race across workers on Postgres (advisory lock added, tested with 4 concurrent starters); pool creation race; token rotate, revoke and driver creation now write `auth_audit` rows (migration 0005, plus indexes on `missions(assigned_driver_id,status)` and `mission_audit(mission_id)`); text fields stripped and capped at 200 characters; queued pings cleared on sign-out.
 Added this round: console buttons to rotate and revoke driver tokens; token-expiry banner in the driver app (7 days); pools closed on shutdown; `docker-compose.yml`, `Caddyfile`, `backend/Dockerfile` and `docs/deploy.md` (UNTESTED: no Docker daemon was available); e2e now 37 checks.
 **Not fixed:** `GET /missions` has no pagination or limit; no request-body size limit at the proxy; "latest position" is ordered by the client timestamp, so a ping dated up to 60 s ahead can outrank real ones until then; vehicle and driver creation are not in `auth_audit`; an expired dispatcher token needs the bootstrap CLI.
+
+### Update 12 (2026-10-14): status check, no code changed
+
+Checked: last commit is `5e9dee4` (2026-10-13); the only untracked files are `.DS_Store` and `now.md` (one line: the owner's goal of automatic traffic-light connection and specialised AI cameras). I did not re-run `scripts/check.sh` or the tests this round.
+**Score:** unchanged at 18%. The cap reason "no Postgres run" no longer holds (Postgres 16 passes locally and in CI), but the cap stays: no pilot operator, no real phone or GPS test, no real host, no human review of auth code, no counsel review.
+**Note on `now.md`:** signal preemption stays out until the gates in `docs/roadmap.md` are met (see Update 8, gap 9).
+**Next, first:** one fleet operator for a pilot; run the driver app on a real phone with real GPS; host with HTTPS; human review of auth and audit code.
+
+### Update 13 (2026-10-14, agent round, pushed `f2d3456`)
+
+Done (agent-made; `scripts/check.sh` exit 0, 109 passed, SQLite only, Postgres not re-run): `GET /missions` takes `limit` (default 200, max 500) and `offset`; a ping's `ts` is clamped to server receive time; vehicle creation writes `create_vehicle` to `auth_audit`; `ping_limit` rows older than 24 h are pruned at startup; Caddy body limit 64 KB plus an app 413 check.
+**Not covered:** the 413 check misses chunked bodies (Caddy only); pruning runs at startup only. Score unchanged at 18%; gaps 1, 5, 7 and 9 are untouched.
