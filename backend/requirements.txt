@@ -1,9 +1,5 @@
 fastapi
-httpx
-pytest
 uvicorn
 alembic
 sqlalchemy
-jsonschema
-pyyaml
 psycopg[binary,pool]
