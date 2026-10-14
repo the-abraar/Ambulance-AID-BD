@@ -168,23 +168,27 @@ def run(base, dtok):
         shot(drv, "driver_360_dispatched.png", "driver app 360x740, mission DISPATCHED with next-step button and navigate link")
         last_ts = None
         for i, st in enumerate(PATH):
-            if st != "COMPLETED":  # terminal: driver has no current mission, so no badge
+            if st != "COMPLETED":  # terminal: the "mission completed" card has no badge
                 ok(BN[st] in drv.inner_text(".badge"), f"driver badge shows Bangla label for {st}")
             con.click("#filter"); con.select_option("#filter", ""); con.evaluate("1")
             con.wait_for_function(f"[...document.querySelectorAll('#missions tbody tr')].some(r=>r.textContent.includes('Mirpur-10')&&r.cells[1].textContent==='{st}')", timeout=12000)
             ok(True, f"console reflects {st}")
             if st != "COMPLETED":
-                time.sleep(5.2 if i else 0)  # app throttles pings to 1/5 s; headless fires one GPS event per set_geolocation
-                dctx.set_geolocation({"latitude": 23.78 + i * 0.001, "longitude": 90.41 + i * 0.001})
+                time.sleep(5.2)  # app throttles pings to 1/5 s; headless fires one GPS event per new position
+                lat = 23.781 + i * 0.001
+                dctx.set_geolocation({"latitude": lat, "longitude": 90.41 + i * 0.001})
                 end = time.time() + 15; got = None
                 while time.time() < end:
                     try:
                         got = api(base, dtok, f"/vehicles/{veh_id}/position")
-                        if got["ts"] != last_ts and abs(got["lat"] - (23.78 + i * 0.001)) < 1e-6: break
+                        if got["ts"] != last_ts and abs(got["lat"] - lat) < 1e-6: break
                     except Exception:
                         pass
                     time.sleep(0.5)
-                ok(got and got["ts"] != last_ts and abs(got["lat"] - (23.78 + i * 0.001)) < 1e-6, f"fresh ping arrived at {st}")
+                fresh = got and got["ts"] != last_ts and abs(got["lat"] - lat) < 1e-6
+                if not fresh:
+                    print("driver status:", drv.inner_text("#status"), "queue:", drv.evaluate("localStorage.getItem('driver_ping_queue')"))
+                ok(fresh, f"fresh ping arrived at {st}")
                 last_ts = got["ts"]
                 nxt = PATH[i + 1]
                 drv.click(f"button.big[data-s={nxt}]")
@@ -345,11 +349,14 @@ def bridge_checks(b, base, atok, page_in):
     shot(k, "driver_360_paired_qr.png", "driver app 360x740 after opening the console's QR link, no mission")
 
     # lie-fi: a request that never answers gives up after 10 s with a visible message, which clears on the next answer
-    k.route("**/missions/current", lambda r: None)
+    hung = []
+    k.route("**/missions/current", lambda r: hung.append(r))  # never answered: the app's 10 s timeout must fire
     k.click("#rf")
     k.wait_for_function("document.getElementById('status').textContent.includes('নেটওয়ার্ক ধীর')", timeout=15000)
     ok(True, "a hung request times out with the Bangla 'network slow, retrying' message")
     shot(k, "driver_360_network_slow.png", "driver app 360x740, Bangla 'network slow, retrying' message after a 10 s timeout")
+    for r in hung:
+        r.abort()  # release the parked requests so unroute does not cancel a pending handler
     k.unroute("**/missions/current")
     k.click("#rf")
     k.wait_for_function("!document.getElementById('status').textContent.includes('নেটওয়ার্ক ধীর')")

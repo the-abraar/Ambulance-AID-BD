@@ -188,10 +188,10 @@ async function load() {
     me = await r.json();
     const m = await api('GET', '/missions/current'); // also a mission that ended in the last 10 min (B15)
     if (m.status === 404) mission = null; else if (m.ok) mission = await m.json(); else return;
+    track(); // right after mission changes: the alert timer reads it
     if (!Object.keys(trans).length) { const tr = await api('GET', '/meta/transitions'); if (tr.ok) trans = await tr.json(); } // fixed per role
     sayT('net', '');
     sayT('exp', Date.parse(me.token_expires_at) - Date.now() < 7 * 864e5 ? 'expSoon' : '', true);
-    track();
   } catch (e) { if (e.name !== 'AbortError') sayT('net', navigator.onLine ? 'eNet' : 'offline', true); }
   render();
 }
