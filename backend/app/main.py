@@ -42,6 +42,7 @@ MAX_SPEED_MPS = 70  # 250 km/h: faster than any ambulance on Bangladesh roads
 JUMP_SLACK_M = 1000  # GPS and cell-fix noise on top of the reported accuracies
 JUMP_WINDOW_S = 600  # only compare with a recent fix, so one bad accepted fix cannot block real ones for long
 BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+ANDROID_PACKAGE = "bd.ambulanceaid.driver"  # android/app/build.gradle.kts applicationId
 
 
 def bd_phone(v: str) -> str:
@@ -72,6 +73,10 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     if retention_days < 1:
         raise RuntimeError("AMBULANCE_PING_RETENTION_DAYS must be at least 1")
     dev = os.environ.get("AMBULANCE_DEV") == "1"
+    # The Android app's signing-key SHA-256 (comma-separated), so the console's pairing QR opens the app (App Link).
+    android_certs = [c.strip().upper() for c in os.environ.get("AMBULANCE_ANDROID_CERT_SHA256", "").split(",") if c.strip()]
+    if not all(re.fullmatch(r"([0-9A-F]{2}:){31}[0-9A-F]{2}", c) for c in android_certs):
+        raise RuntimeError("AMBULANCE_ANDROID_CERT_SHA256 must be colon-separated SHA-256 fingerprints (AB:CD:...)")
 
     def prune():
         with closing(open_db(path)) as db:
@@ -254,6 +259,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         except Exception:  # any DB failure means "not ready"
             return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}
+
+    @app.get("/.well-known/assetlinks.json")
+    def assetlinks():
+        # No auth on purpose: Android fetches it to verify that the driver app may open this host's /driver/ links.
+        if not android_certs:
+            raise HTTPException(404, "not configured")
+        return [{"relation": ["delegate_permission/common.handle_all_urls"],
+                 "target": {"namespace": "android_app", "package_name": ANDROID_PACKAGE,
+                            "sha256_cert_fingerprints": android_certs}}]
 
     @app.post("/missions", status_code=201)
     def create_mission(body: MissionIn, bg: BackgroundTasks, u: dict = Depends(dispatcher_only),

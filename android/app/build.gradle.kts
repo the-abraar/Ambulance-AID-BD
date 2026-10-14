@@ -1,3 +1,4 @@
+import java.net.URI
 import java.util.Properties
 
 plugins {
@@ -10,6 +11,12 @@ val localProps = Properties().apply {
 }
 val baseUrlProp = (findProperty("ambulance.baseUrl") as String?) ?: localProps.getProperty("ambulance.baseUrl")
 val devUrl = "http://10.0.2.2:8000/driver/" // the host machine as seen from the Android emulator
+
+// The App Link for the console's pairing QR (<BASE_URL>#pair=CODE). An unset release URL fails in preReleaseBuild below;
+// the placeholder host only lets Gradle configure.
+fun appLink(url: String): Map<String, String> = URI(url.ifEmpty { "https://unset.invalid/driver/" }).let {
+    mapOf("appLinkScheme" to it.scheme, "appLinkHost" to it.host, "appLinkPath" to it.path.ifEmpty { "/" })
+}
 
 android {
     namespace = "bd.ambulanceaid.driver"
@@ -28,10 +35,12 @@ android {
     buildTypes {
         debug {
             buildConfigField("String", "BASE_URL", "\"${baseUrlProp ?: devUrl}\"")
+            manifestPlaceholders += appLink(baseUrlProp ?: devUrl)
         }
         release {
             // Release must be HTTPS and must name its host; there is no default. Signing is the owner's (see docs/android-wrapper.md).
             buildConfigField("String", "BASE_URL", "\"${baseUrlProp.orEmpty()}\"")
+            manifestPlaceholders += appLink(baseUrlProp.orEmpty())
         }
     }
 }

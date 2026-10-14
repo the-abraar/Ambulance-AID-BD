@@ -26,6 +26,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The console's pairing QR (BASE_URL#pair=CODE) opens this app instead of the browser once the server
+                 publishes /.well-known/assetlinks.json with the release key (AMBULANCE_ANDROID_CERT_SHA256). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${appLinkScheme}" android:host="${appLinkHost}" android:pathPrefix="${appLinkPath}" />
+            </intent-filter>
         </activity>
         <service
             android:name=".TrackingService"

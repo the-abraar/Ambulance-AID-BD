@@ -21,6 +21,19 @@ paths:
         '200': {description: DB reachable., content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}}
         '503': {description: DB unreachable., content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}}
 
+  /.well-known/assetlinks.json:
+    get:
+      summary: Android App Link statement for the driver app (no auth; Android fetches it)
+      description: >
+        Lets the Android driver app open this host's /driver/ links, such as the console's pairing QR code. Built from
+        AMBULANCE_ANDROID_CERT_SHA256 (the app's signing-key fingerprints); 404 when that is unset.
+      operationId: assetLinks
+      responses:
+        '200':
+          description: Digital Asset Links statement list.
+          content: {application/json: {schema: {type: array, items: {type: object}}}}
+        '404': {description: Not configured.}
+
   /pair:
     post:
       summary: Exchange a 6-digit pairing code for a driver token (no auth; the one-time code is the credential)

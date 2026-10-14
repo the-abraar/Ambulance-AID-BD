@@ -42,7 +42,9 @@ Plain HTML/CSS/JS, no build. Sign in with a dispatcher or admin token (`python -
 - **Vehicles:** any dispatcher pairs a driver with a vehicle ("Pair driver with vehicle"; "(nobody)" unpairs).
 - **Drivers:** everyone sees the phone, the token state (valid until, revoked, expired) and a list of tokens expiring
   within 7 days. Admins only: "Add driver" (name, optional phone), then a pairing dialog with a 6-digit code (one use,
-  10 minutes) and a QR code of `/driver/#pair=CODE`. "Pairing code" issues a new one. "Show token" rotates the token
+  10 minutes) and a QR code of `/driver/#pair=CODE`. The dialog tells drivers with the Android app to type the code in
+  the app: the QR opens the app only once App Links are set up (`docs/android-wrapper.md`), and pairing the browser
+  instead signs the app out. "Pairing code" issues a new one. "Show token" rotates the token
   and shows the raw value: avoid it, because a pasted token lives in the chat for 90 days. "Revoke" signs the driver out.
 - **Network:** polls `/vehicles`, `/drivers` and `/missions?active=true` every 5 s, plus the shown page in History.
   `/meta/transitions` (normal and `on_behalf=true`) is fetched once at sign-in.

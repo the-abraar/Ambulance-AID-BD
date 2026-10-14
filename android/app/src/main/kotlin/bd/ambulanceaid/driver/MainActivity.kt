@@ -89,9 +89,15 @@ class MainActivity : Activity() {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         }
         TrackingService.onStopped = onStopped
-        if (savedInstanceState == null) web.loadUrl(BuildConfig.BASE_URL) else web.restoreState(savedInstanceState)
+        if (savedInstanceState == null) web.loadUrl(link(intent) ?: BuildConfig.BASE_URL) else web.restoreState(savedInstanceState)
         nextSetupStep()
     }
+
+    // singleTask: a pairing QR scanned while the app runs arrives here; the page pairs on the #pair= hash change.
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); link(intent)?.let { web.loadUrl(it) } }
+
+    /** An App Link into the driver app on our own origin (the console's pairing QR), else null. */
+    private fun link(i: Intent?) = i?.dataString?.takeIf { sameOrigin(it) }
 
     override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); web.saveState(outState) }
 

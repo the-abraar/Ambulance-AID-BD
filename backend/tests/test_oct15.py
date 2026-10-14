@@ -107,3 +107,20 @@ def test_n6_backfill_refuses_impossible_timelines(env):
                       headers=env["D"])
     assert r.status_code == 422  # a back-fill without its steps would be a live dispatch with an old time
     assert env["c"].get("/missions", headers=env["D"]).json() == []
+
+
+def test_n8_assetlinks_lets_the_pairing_qr_open_the_android_app(env, monkeypatch):
+    import pytest
+    from fastapi.testclient import TestClient
+    from app.main import ANDROID_PACKAGE, create_app
+    assert env["c"].get("/.well-known/assetlinks.json").status_code == 404  # not configured: links open the browser
+    fp = ":".join(["AB"] * 32)
+    monkeypatch.setenv("AMBULANCE_ANDROID_CERT_SHA256", fp.lower())
+    r = TestClient(create_app(env["path"])).get("/.well-known/assetlinks.json")
+    assert r.status_code == 200 and r.json()[0]["target"] == {"namespace": "android_app", "package_name": ANDROID_PACKAGE,
+                                                               "sha256_cert_fingerprints": [fp]}
+    gradle = (Path(__file__).resolve().parents[2] / "android/app/build.gradle.kts").read_text()
+    assert f'applicationId = "{ANDROID_PACKAGE}"' in gradle
+    monkeypatch.setenv("AMBULANCE_ANDROID_CERT_SHA256", "AB:CD")
+    with pytest.raises(RuntimeError):  # a typo would silently break verification: fail at startup instead
+        create_app(env["path"])

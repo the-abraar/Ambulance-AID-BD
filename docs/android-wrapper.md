@@ -19,6 +19,11 @@ also runs between missions: it reports the free vehicle once a minute and rings 
   service no fixes on 11-13 and refuses it on 14+): it posts "Tracking stopped: open the app" and stops.
 - `PingQueue` (plain Kotlin, unit-tested): the sampling and drop rules below.
 - `ShiftWatch` (plain Kotlin, unit-tested): what the shift poll's answer means (alert, clear, stop, mission or not).
+- App Link: `BASE_URL`'s scheme, host and path (`/driver/`) open in the app, so scanning the console's pairing QR
+  (`/driver/#pair=CODE`) pairs the app, not the browser. Android verifies it against the server's
+  `/.well-known/assetlinks.json`, which lists `AMBULANCE_ANDROID_CERT_SHA256` (the signing key's fingerprint:
+  `keytool -list -v -keystore <release keystore>`). Until that is set, the link opens the browser, and the console tells
+  drivers with the app to type the code instead.
 - No runtime dependencies (platform `LocationManager`, no Play Services, no AndroidX). `minSdk` 26, `targetSdk` 36.
 
 ## JavaScript interface: `window.AmbulanceNative`
@@ -141,7 +146,9 @@ Emulator smoke test, 2026-10-14 (Android 17 image, API 37.1; not a real phone):
 ## Not done (owner)
 
 - Release signing: create a keystore, add a `signingConfigs` block reading it from outside the repo, then
-  `./gradlew assembleRelease -Pambulance.baseUrl=https://<real host>/driver/`.
+  `./gradlew assembleRelease -Pambulance.baseUrl=https://<real host>/driver/`. Put the key's SHA-256 in the server's
+  `AMBULANCE_ANDROID_CERT_SHA256`, and check on a phone that scanning the pairing QR opens the app (UNVERIFIED: not
+  run, it needs the real host).
 - The real host URL.
 - A device test on two or three cheap Androids (Xiaomi/Redmi, Realme, Vivo or Oppo): screen off, Navigate to Maps,
   2G, 30+ minutes. The emulator does not reproduce OEM background killers. Add for shift mode (not yet run, even on the
