@@ -179,7 +179,10 @@ function alerting(on) { // until Accept: flashing title, siren and vibration eve
 }
 function alertTick() {
   document.title = alertN % 2 ? TITLE : `*** ${t('newM')} ***`;
-  if (alertN++ % 3 === 0) { siren(); try { navigator.vibrate?.([400, 200, 400]); } catch (e) {} }
+  if (alertN++ % 3 === 0) {
+    siren();
+    if (navigator.userActivation?.hasBeenActive ?? true) try { navigator.vibrate?.([400, 200, 400]); } catch (e) {} // before a tap Chrome blocks it with a console error
+  }
   if (notified !== mission.mission_id && window.Notification?.permission === 'granted') { notified = mission.mission_id; notify(); }
 }
 const alertsOff = () => !audio || window.Notification?.permission === 'default';

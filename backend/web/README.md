@@ -80,7 +80,7 @@ shell, never API calls. Bump its cache name `C` whenever you change a cached fil
   pairing form and keeps the queue.
 - **New mission:** until the driver taps Accept (`POST /missions/{id}/ack`), the app flashes the card and the tab
   title, and plays a WebAudio siren and vibrates every 3 s. It also shows one notification with the address. Only
-  then does it show the step buttons. Browsers allow sound only after a tap, and the app counts any tap. "Turn on
+  then does it show the step buttons. Browsers allow sound and vibration only after a tap, and the app counts any tap. "Turn on
   mission alerts" also asks for notification permission.
 - **Tracking (web):** while a mission is active and has a vehicle, the app runs a GPS watch, sends a ping every 5 s
   with `accuracy` and `sent_at`, and holds a screen wake lock. With no vehicle, it shows a message and never pings.
