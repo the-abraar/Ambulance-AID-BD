@@ -100,3 +100,13 @@ def test_concurrent_migrate_on_postgres():
         list(ex.map(lambda _: migrate(url), range(4)))
     with psycopg.connect(url) as c:
         assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0006"
+
+
+def test_0006_states_match_state_machine():
+    import importlib.util
+    from app.main import TERMINAL
+    from app.state_machine import INITIAL, State
+    sp = importlib.util.spec_from_file_location("m0006", Path(__file__).resolve().parent.parent / "migrations/versions/0006_dispatch_loop.py")
+    m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
+    assert m.ACTIVE.format(t="") == f"status NOT IN ({','.join(repr(s) for s in TERMINAL)})"  # partial index predicate
+    assert m.STEPS == [s.value for s in State if s is not INITIAL]  # one <status>_at column per reachable status
