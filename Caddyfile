@@ -1,6 +1,22 @@
 {$DOMAIN} {
+	encode zstd gzip
 	request_body {
 		max_size 64KB
 	}
-	reverse_proxy app:8000
+	header {
+		# Leaflet (vendored) positions tiles through element.style, which CSP allows; markup must not use style="".
+		# The map tiles come from tile.openstreetmap.org and its subdomains.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		# Not no-referrer: the OSM tile servers refuse requests without a Referer. Cross-origin gets the origin only.
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "geolocation=(self), camera=(), microphone=()"
+	}
+	reverse_proxy app:8000 {
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 3s
+	}
 }

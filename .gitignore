@@ -18,3 +18,5 @@ build/
 !.env.example
 # Browser e2e captures
 backend/tests/shots/
+# Nightly database dumps (docker compose backup service)
+backups/
