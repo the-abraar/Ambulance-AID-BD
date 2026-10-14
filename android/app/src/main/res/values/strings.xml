@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dialogs are bilingual (Bangla first) because drivers' phones are often set to English. Bangla is UNVERIFIED by a native reviewer. -->
+<resources>
+    <string name="app_name">Ambulance Driver</string>
+    <color name="launcher_bg">#D32F2F</color>
+    <string name="channel_tracking">গাড়ির অবস্থান · Vehicle tracking</string>
+    <string name="tracking_title">Tracking vehicle %1$s</string>
+    <string name="tracking_text">ডিসপ্যাচারকে লোকেশন পাঠানো হচ্ছে · Sending location to the dispatcher</string>
+    <string name="why_location">মিশন চলার সময় ডিসপ্যাচার অ্যাম্বুলেন্সের অবস্থান দেখেন। পরের স্ক্রিনে সঠিক (Precise) লোকেশন এবং \"অ্যাপ ব্যবহারের সময়\" অনুমতি দিন।\n\nThe dispatcher sees the ambulance\'s position during a mission. On the next screen, allow precise location \"while using the app\".</string>
+    <string name="why_notifications">ট্র্যাকিং চলার সময় একটি নোটিফিকেশন দেখাবে, যাতে ফোন অ্যাপটি বন্ধ না করে।\n\nA notification shows while tracking runs, so the phone does not stop the app.</string>
+    <string name="why_battery">স্ক্রিন বন্ধ থাকলেও লোকেশন পাঠাতে অ্যাপটিকে ব্যাটারি অপটিমাইজেশনের বাইরে রাখুন। পরের স্ক্রিনে \"Allow\" চাপুন।\n\nTo keep sending location with the screen off, let the app ignore battery optimisation. Tap \"Allow\" on the next screen.</string>
+    <string name="oem_guide">এই ফোন ব্যাকগ্রাউন্ডের অ্যাপ বন্ধ করে দিতে পারে। অ্যাপ সেটিংসে Autostart চালু করুন, Battery-তে \"No restrictions\" বা \"Allow background activity\" দিন, আর Recent apps-এ অ্যাপটি লক করুন।\n\nThis phone may stop background apps. In the app\'s settings, turn on Autostart, set Battery to \"No restrictions\" or \"Allow background activity\", and lock the app in Recent apps.</string>
+    <string name="continue_">ঠিক আছে · Continue</string>
+    <string name="not_now">এখন না · Not now</string>
+    <string name="open_settings">সেটিংস · Settings</string>
+    <string name="open_guide">গাইড · Guide</string>
+</resources>
