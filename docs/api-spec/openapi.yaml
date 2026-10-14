@@ -116,7 +116,7 @@ paths:
         '200': {description: Updated., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
         '403': {description: "Wrong role, or not the assigned driver."}
         '409': {description: "Illegal transition, or the status changed concurrently."}
-        '422': {description: "Missing reason on an on-behalf move, event_time outside creation..now, or invalid body."}
+        '422': {description: "Missing reason on an on-behalf move, event_time older than 7 days or in the future, or invalid body."}
 
   /missions/{missionId}/ack:
     post:
@@ -446,7 +446,7 @@ components:
         event_time:
           type: string
           format: date-time
-          description: Dispatchers only; when it really happened (between mission creation and now). Defaults to now.
+          description: Dispatchers only; when it really happened (within the last 7 days, not in the future; may predate the mission for a paper-log back-fill). Defaults to now.
 
     Mission:
       type: object

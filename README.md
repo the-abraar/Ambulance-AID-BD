@@ -6,7 +6,8 @@
 
 **What exists**
 - A tested backend (`backend/`, Python/FastAPI): mission state machine, mission create/status/read APIs, vehicle GPS pings, per-user hashed bearer tokens, admin, dispatcher and driver roles, dispatcher status changes on a driver's behalf with a reason, 6-digit driver pairing codes, an optional SMS fallback, mission and auth audit logs, 90-day ping retention, `/healthz`, Alembic migrations. SQLite for dev, Postgres supported. Agent-written; test results are agent-reported (see `judge.md`).
-- A dispatcher console (`/console/`) and a Bangla/English driver web app (`/driver/`), tested only in headless browsers with a fake GPS fix. The console shows positions as coordinates; there is no map yet.
+- A dispatcher console (`/console/`) and a Bangla/English driver web app (`/driver/`), tested only in headless browsers with a fake GPS fix. The console has a map (OpenStreetMap) with free, busy and stale vehicles, click-to-place pickup, an active-missions view with a 2-minute no-acknowledgement alarm, cancel and on-behalf dialogs that require a reason, and 6-digit or QR driver pairing. The driver app alerts on a new mission (sound, vibration, notification) and asks the driver to accept it.
+- An Android wrapper for the driver app (`android/`), so location keeps reporting with the screen off or Maps open. Smoke-tested on an emulator only. Build and contract: [docs/android-wrapper.md](docs/android-wrapper.md).
 - CI on GitHub runs the checks on SQLite and Postgres 16.
 - A docker compose stack (Caddy with security headers, Postgres with a least-privilege app role, nightly backups, a restore script), run end to end on a laptop only. See [docs/deploy.md](docs/deploy.md).
 - Design documents under `docs/` and an OpenAPI spec (`docs/api-spec/openapi.yaml`).
@@ -14,7 +15,7 @@
 **What does not exist**
 - No signal integration or signal-control code of any kind.
 - No partners, no pilot LOI, no government engagement, no legal opinion.
-- No field testing, no real vehicles, no real users. The driver app has never run on a real phone; a web page is expected to lose GPS when the screen is off or Maps is open.
+- No field testing, no real vehicles, no real users. The driver app and the Android wrapper have never run on a real phone; the web page alone is expected to lose GPS when the screen is off or Maps is open, which is why the wrapper exists.
 - Not hosted anywhere. No offsite backups, monitoring or alerting. PostGIS not used.
 - No measured baseline data. Impact figures in the architecture docs are unsourced estimates (see labels in those docs).
 

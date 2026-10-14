@@ -31,6 +31,7 @@ TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
 ACTIVE_SQL = f"status NOT IN ({','.join('?' * len(TERMINAL))})"  # bind *TERMINAL after it
 STALE_S = 120  # a position older than this is shown as stale (same as the console's STALE_MS)
 RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission this long, so the driver sees why
+BACKFILL_WINDOW = timedelta(days=7)  # an on-behalf event_time may predate the mission: paper-log missions are entered after the outage
 PAIR_CODE_TTL = timedelta(minutes=10)
 PAIR_CODE_MAX_FAILS = 5  # bad /pair attempts a live code survives
 PAIR_CLIENT_FAILS, PAIR_CLIENT_WINDOW_S = 10, 600
@@ -471,8 +472,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         if need == "driver" and not behalf and row["assigned_driver_id"] != u["driver_id"]:
             raise HTTPException(403, "not the assigned driver")
         at = body.event_time and body.event_time.astimezone(timezone.utc).isoformat(timespec="microseconds")
-        if at and not row["created_at"] <= at <= now():
-            raise HTTPException(422, "event_time must lie between mission creation and now")
+        if at and not now(-BACKFILL_WINDOW) <= at <= now():
+            raise HTTPException(422, "event_time must lie within the last 7 days and not in the future")
         try:
             new = transition(State(row["status"]), body.status)
         except InvalidTransition as e:

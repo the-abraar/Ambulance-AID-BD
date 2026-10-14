@@ -121,7 +121,7 @@ const CONTACT = "OWNER TODO: name · phone · email";
  <div class="eyebrow">What exists today <span class="tag">built</span></div>
  <h2>A working dispatch prototype.</h2>
  <div class="grid g3">
-  <div class="card"><b>Dispatcher console</b>Create, assign and cancel missions; mission history. Each vehicle's last position as coordinates with its age, refreshed every 5 s, sent only during a mission while the driver app is open. No map yet.</div>
+  <div class="card"><b>Dispatcher console</b>Create, assign and cancel missions; mission history. Vehicles on a map (OpenStreetMap), free, busy or stale, refreshed every 5 s, with an alarm when a driver has not accepted a mission in 2 minutes. Tested in headless browsers and an Android emulator, not yet on real phones.</div>
   <div class="card"><b>Driver app (PWA)</b>Bangla and English. Low-end phones: UNVERIFIED, never run on a real phone. Offline queue: GPS pings up to 5 minutes old are sent when signal returns; older ones are dropped.</div>
   <div class="card"><b>Status-change audit trail</b>Every status change records who, from which state, to which, and when, including a dispatcher's change on a driver's behalf, with its reason.</div>
   <div class="card"><b>Role-based access</b>Dispatchers manage. A driver can only touch the mission assigned to them.</div>

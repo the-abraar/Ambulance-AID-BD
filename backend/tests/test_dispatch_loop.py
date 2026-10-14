@@ -73,9 +73,9 @@ def test_b3_dispatcher_moves_for_the_driver(env):
     assert c.patch(p, json={"status": "AT_HOSPITAL"}, headers=D).status_code == 422  # reason required
     assert c.patch(p, json={"status": "AT_HOSPITAL", "reason": "x", "event_time": iso(minutes=5)}, headers=D).status_code == 422
     assert c.patch(p, json={"status": "AT_HOSPITAL", "reason": "x", "event_time": "2000-01-01T00:00:00Z"},
-                   headers=D).status_code == 422  # before the mission existed
+                   headers=D).status_code == 422  # older than the back-fill window
     assert c.patch(p, json={"status": "AT_HOSPITAL", "reason": "x"}, headers=env["V"]).status_code == 422  # drivers cannot
-    when = iso()  # after creation, not in the future
+    when = iso(hours=-1)  # before the mission was entered: a paper-log back-fill after an outage
     r = c.patch(p, json={"status": "AT_HOSPITAL", "reason": "driver phone dead", "event_time": when}, headers=D)
     assert r.status_code == 200 and r.json()["status"] == "AT_HOSPITAL"
     assert datetime.fromisoformat(r.json()["at_hospital_at"]) == datetime.fromisoformat(when)

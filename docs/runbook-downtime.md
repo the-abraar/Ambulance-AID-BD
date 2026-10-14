@@ -21,7 +21,7 @@ Treat the system as down when the console will not load or shows no fresh vehicl
 
 ## After recovery
 
-1. Enter every paper-log mission and move it through the steps it went through, as status changes on the driver's behalf with the reason "outage, paper log" and the real time from the paper log as the event time. The audit log records the dispatcher as actor, the driver, the reason and both times. Until the console has a button for this, use `PATCH /missions/{id}/status` with `reason` and `event_time`. Keep the paper log.
+1. Enter every paper-log mission and move it through the steps it went through, as status changes on the driver's behalf with the reason "outage, paper log" and the real time from the paper log as the event time. The audit log records the dispatcher as actor, the driver, the reason and both times. Use the console's "On behalf: <step>" button: reason "outage, paper log", and the paper log's time in "When it happened" (Dhaka time, up to 7 days back). Keep the paper log.
 2. Drivers keep the app open: queued pings (up to 5 minutes old) are sent on their own.
 3. Write down the outage start and end, cause, and how many missions ran on paper. Review it with the operator within a week.
 
