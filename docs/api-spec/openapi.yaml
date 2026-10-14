@@ -423,6 +423,10 @@ components:
           minimum: -90
           maximum: 90
           description: Must be sent together with pickup_lng.
+        dispatched_at:
+          type: [string, "null"]
+          format: date-time
+          description: Paper-log back-fill only. The real dispatch time (within the last 7 days, not in the future); it becomes created_at, the audit keeps the entry time, and the driver is not alerted.
         pickup_lng:
           type: [number, "null"]
           minimum: -180

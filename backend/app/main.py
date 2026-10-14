@@ -177,6 +177,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         assigned_driver_id: str | None = None  # omitted: taken from the vehicle's paired driver
         pickup_lat: float | None = Field(None, ge=-90, le=90)
         pickup_lng: float | None = Field(None, ge=-180, le=180)
+        dispatched_at: AwareDatetime | None = None  # paper-log back-fill: the real dispatch time; the driver is not alerted
 
         @model_validator(mode="after")
         def both_or_neither(self):
@@ -263,16 +264,19 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                       (*TERMINAL, vid, did)).fetchone():
             raise HTTPException(409, "vehicle or driver already has an active mission")
         mid, t = str(uuid.uuid4()), now()
+        at = body.dispatched_at and body.dispatched_at.astimezone(timezone.utc).isoformat(timespec="microseconds")
+        if at and not now(-BACKFILL_WINDOW) <= at <= t:
+            raise HTTPException(422, "dispatched_at must lie within the last 7 days and not in the future")
         try:  # the partial unique indexes (migration 0006) stop two dispatchers racing past the check above
             db.execute("INSERT INTO missions (id,status,pickup_address,assigned_vehicle_id,assigned_driver_id,created_at,"
                        "updated_at,pickup_lat,pickup_lng) VALUES (?,?,?,?,?,?,?,?,?)",
-                       (mid, INITIAL.value, body.pickup_address, vid, did, t, t, body.pickup_lat, body.pickup_lng))
+                       (mid, INITIAL.value, body.pickup_address, vid, did, at or t, t, body.pickup_lat, body.pickup_lng))
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, "vehicle or driver already has an active mission")
-        audit(db, mid, u["id"], None, INITIAL.value, t)
+        audit(db, mid, u["id"], None, INITIAL.value, t, reason="back-fill" if at else None, event_time=at)
         db.commit()
-        if did:
+        if did and not at:  # a back-filled mission is already over: never page the driver for it
             bg.add_task(notify_driver, mid, "create")
         return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
 
@@ -474,6 +478,9 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         at = body.event_time and body.event_time.astimezone(timezone.utc).isoformat(timespec="microseconds")
         if at and not now(-BACKFILL_WINDOW) <= at <= now():
             raise HTTPException(422, "event_time must lie within the last 7 days and not in the future")
+        prev = row["created_at"] if row["status"] == INITIAL.value else row[f"{row['status'].lower()}_at"] or row["created_at"]
+        if at and at < prev:  # step times only move forward, or response-time figures come out negative
+            raise HTTPException(422, "event_time is before the mission's previous step")
         try:
             new = transition(State(row["status"]), body.status)
         except InvalidTransition as e:

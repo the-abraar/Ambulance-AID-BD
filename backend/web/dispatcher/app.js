@@ -277,8 +277,10 @@ $("behalf-dlg").querySelector("form").onsubmit = (e) => {
 $("newm").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target.elements; // assigned_driver_id omitted: the server takes the vehicle's paired driver
+  const at = f.dispatched.value; // back-fill only; datetime-local has no zone: the label says Dhaka time
   const body = { pickup_address: f.addr.value.trim(), assigned_vehicle_id: f.veh.value,
-    ...(pickup ? { pickup_lat: pickup.lat, pickup_lng: pickup.lng } : {}) };
+    ...(pickup ? { pickup_lat: pickup.lat, pickup_lng: pickup.lng } : {}),
+    ...(at ? { dispatched_at: at + (at.length === 16 ? ":00" : "") + "+06:00" } : {}) };
   try { await api("POST", "/missions", body); e.target.reset(); setPickup(null); } catch (err) { /* toast shown */ }
   refresh();
 };

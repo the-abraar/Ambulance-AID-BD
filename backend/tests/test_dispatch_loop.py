@@ -75,7 +75,7 @@ def test_b3_dispatcher_moves_for_the_driver(env):
     assert c.patch(p, json={"status": "AT_HOSPITAL", "reason": "x", "event_time": "2000-01-01T00:00:00Z"},
                    headers=D).status_code == 422  # older than the back-fill window
     assert c.patch(p, json={"status": "AT_HOSPITAL", "reason": "x"}, headers=env["V"]).status_code == 422  # drivers cannot
-    when = iso(hours=-1)  # before the mission was entered: a paper-log back-fill after an outage
+    when = iso()  # after the previous step, not in the future (back-fill: test_sms.py)
     r = c.patch(p, json={"status": "AT_HOSPITAL", "reason": "driver phone dead", "event_time": when}, headers=D)
     assert r.status_code == 200 and r.json()["status"] == "AT_HOSPITAL"
     assert datetime.fromisoformat(r.json()["at_hospital_at"]) == datetime.fromisoformat(when)
