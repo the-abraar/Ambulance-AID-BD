@@ -30,12 +30,22 @@ class MainActivity : Activity() {
     private val asked = mutableSetOf<String>() // setup steps already offered in this launch
     private var setupOpen = false // a setup dialog or permission request is on screen
     private var pendingGeo: Pair<String, GeolocationPermissions.Callback>? = null
+    private var resumed = false
+    private var pendingStop: String? = null
     private val onStopped: (Int, String) -> Unit = { status, reason ->
         runOnUiThread { // reason is one of TrackingService's fixed words, safe to inline
-            web.evaluateJavascript("window.dispatchEvent(new CustomEvent('ambulance-native-stopped'," +
-                "{detail:{status:$status,reason:'$reason'}}))", null)
+            pendingStop = "window.dispatchEvent(new CustomEvent('ambulance-native-stopped'," +
+                "{detail:{status:$status,reason:'$reason'}}))"
+            if (resumed) flushStop()
         }
     }
+
+    // A page hidden for long can be frozen and lose the event (seen once on the emulator), so deliver it on screen.
+    private fun flushStop() { pendingStop?.let { web.evaluateJavascript(it, null) }; pendingStop = null }
+
+    override fun onResume() { super.onResume(); resumed = true; flushStop() }
+
+    override fun onPause() { resumed = false; super.onPause() }
 
     @SuppressLint("SetJavaScriptEnabled") // the page is our own driver app; other origins open outside the WebView
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +97,8 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    @Deprecated("Android 12 and older; 13+ uses the OnBackInvokedCallback above")
+    @SuppressLint("GestureBackNavigation") // only reached below Android 13; 13+ uses the OnBackInvokedCallback above
+    @Deprecated("Android 12 and older")
     override fun onBackPressed() = back()
 
     private fun back() { if (web.canGoBack()) web.goBack() else moveTaskToBack(true) } // keep the page and tracking alive
