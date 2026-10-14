@@ -7,7 +7,7 @@
 - Compare owners, not row ids: a driver is checked against the mission's assigned driver, an operator against its own vehicles. Why: ids are shared across users.
 - Take idempotency keys from the caller (the driver's queued ping or status), never generate them per request. Why: offline replay would duplicate writes.
 - Cap unbounded input explicitly: list `limit`, ping rate, body size, queue length. Why: one client can exhaust the single-worker server.
-- Derive mock and fixture names and shapes from the real source (state machine, openapi.yaml); a test must fail on drift. Why: `web/driver/mock_server.py` and the e2e BN label map can silently diverge.
+- Derive mock and fixture names and shapes from the real source (state machine, openapi.yaml); a test must fail on drift. Why: the driver app's state labels (`test_driver_app_labels_every_state`) and the e2e BN label map can silently diverge.
 - Mark unmeasured user-facing claims UNVERIFIED (response times, lives saved, legal compliance, Bangladesh data-protection). Why: this is safety-critical and pre-pilot.
 - Keep signal preemption out of code until the gates in `docs/roadmap.md` are met. Why: it needs government sign-off and a pentest.
 - Put dynamic text into the DOM via `textContent` or `esc()`; `// safe-html:` needs a real reason. Why: API data must never inject markup into the dispatcher console.
