@@ -42,6 +42,11 @@ services:
     restart: unless-stopped
     environment:
       AMBULANCE_DB_PATH: postgresql://ambulance_app:${APP_DB_PASSWORD}@db:5432/ambulance
+      # Trust X-Forwarded-For (set by Caddy) so POST /pair limits per phone, not per proxy. "*" is safe only
+      # because app publishes no port: only containers on this network reach it.
+      FORWARDED_ALLOW_IPS: "*"
+      AMBULANCE_SMS_API_KEY: ${AMBULANCE_SMS_API_KEY:-}  # both set = SMS fallback on; see backend/README.md
+      AMBULANCE_SMS_SENDER_ID: ${AMBULANCE_SMS_SENDER_ID:-}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 10s

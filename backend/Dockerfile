@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /srv
 COPY requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY app app
 COPY migrations migrations
 COPY web web
