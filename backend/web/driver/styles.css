@@ -17,3 +17,9 @@ dialog{background:#000;color:#fff;border:3px solid #ffd400;border-radius:8px;max
 dialog::backdrop{background:#000b}
 :focus-visible{outline:4px solid #4da3ff;outline-offset:2px}
 a.navlink{display:inline-block;padding:14px 20px;border:2px solid #4da3ff;border-radius:8px;color:#4da3ff;font-weight:700;text-decoration:none}
+.card.new{border-color:#ffd400;animation:flash 1s infinite}
+@keyframes flash{50%{background:#4a3d00}}
+@media (prefers-reduced-motion:reduce){.card.new{animation:none}}
+.card.ended{border-color:#ff6b6b}
+details{margin:20px 0}
+summary{cursor:pointer;padding:12px 0;color:#9cf}
