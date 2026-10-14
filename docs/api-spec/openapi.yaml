@@ -46,9 +46,11 @@ paths:
       security: [{BearerAuth: []}]
       parameters:
         - {name: status, in: query, required: false, schema: {$ref: '#/components/schemas/MissionStatus'}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 200}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
       responses:
         '200':
-          description: Missions.
+          description: Missions, oldest first.
           content:
             application/json:
               schema:

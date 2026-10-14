@@ -1,13 +1,14 @@
 import os
 import secrets
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Annotated
 
@@ -17,6 +18,8 @@ from .bootstrap import add_user, add_vehicle
 from .db import Conn, IntegrityError, close_pools, hash_token, migrate, open_db, token_expiry
 from .state_machine import INITIAL, TRANSITIONS, InvalidTransition, State, required_role, transition
 
+MAX_BODY = 64 * 1024  # keep equal to request_body max_size in Caddyfile
+PING_LIMIT_KEEP_S = 86400
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
 
 
@@ -31,6 +34,16 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
 
     app = FastAPI(title="Ambulance-AID MVP", lifespan=lifespan)
     migrate(path)
+    with closing(open_db(path)) as c0:  # shortcut: prune at startup only; upgrade to a timer if a process runs for months
+        c0.execute("DELETE FROM ping_limit WHERE last_at<?", (time.time() - PING_LIMIT_KEEP_S,))
+        c0.commit()
+
+    @app.middleware("http")
+    async def body_cap(request: Request, call_next):
+        # Caddy enforces the real cap (also for chunked bodies); this rejects honest oversize requests when run without it.
+        if int(request.headers.get("content-length") or 0) > MAX_BODY:
+            return JSONResponse({"detail": "request body too large"}, status_code=413)
+        return await call_next(request)
 
     def get_db():
         # One connection per request; anything left uncommitted is rolled back.
@@ -109,11 +122,12 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
 
     @app.get("/missions")
-    def list_missions(status: State | None = None, u: dict = Depends(user), db: Conn = Depends(get_db)):
+    def list_missions(status: State | None = None, limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+                      u: dict = Depends(user), db: Conn = Depends(get_db)):
         if u["role"] != "dispatcher":
             raise HTTPException(403, "dispatcher only")
-        rows = db.execute("SELECT * FROM missions WHERE (CAST(? AS TEXT) IS NULL OR status=?) ORDER BY created_at",
-                          (status.value if status else None,) * 2).fetchall()
+        rows = db.execute("SELECT * FROM missions WHERE (CAST(? AS TEXT) IS NULL OR status=?) ORDER BY created_at, id LIMIT ? OFFSET ?",
+                          (status.value if status else None,) * 2 + (limit, offset)).fetchall()
         return [out(r) for r in rows]
 
     def load(db: Conn, mid: str):
@@ -184,6 +198,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, "registration already exists")
+        auth_audit(db, u["id"], vid, "create_vehicle")
+        db.commit()
         return {"vehicle_id": vid, "operator": body.operator, "registration": body.registration, "active": True,
                 "last_ping": None}
 
@@ -263,8 +279,9 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_max
             except IntegrityError:
                 db.rollback()
                 raise HTTPException(429, "ping rate limit")
+        # Clamp to receive time: a ping dated slightly ahead must not outrank later real ones in "latest position".
         db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts) VALUES (?,?,?,?)",
-                   (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds")))
+                   (vid, body.lat, body.lng, min(ts, n).isoformat(timespec="microseconds")))
         db.commit()
         return {"ok": True}
 

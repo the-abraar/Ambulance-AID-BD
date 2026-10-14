@@ -162,3 +162,32 @@ def test_terminal_state_not_overwritten(env):
     r = env["c"].patch(f"/missions/{mid}/status", json={"status": "EN_ROUTE_PICKUP"}, headers=env["V"])
     assert r.status_code == 409
     assert env["c"].get(f"/missions/{mid}", headers=env["D"]).json()["status"] == "CANCELLED"
+
+
+def test_missions_pagination(env):
+    c, D = env["c"], env["D"]
+    ids = [mk(env) for _ in range(3)]
+    assert [m["mission_id"] for m in c.get("/missions", headers=D).json()] == ids
+    assert [m["mission_id"] for m in c.get("/missions?limit=2&offset=1", headers=D).json()] == ids[1:]
+    for q in ("limit=0", "limit=501", "offset=-1"):
+        assert c.get(f"/missions?{q}", headers=D).status_code == 422
+
+
+def test_future_ping_clamped_to_receive_time(env):
+    c = env["c"]
+    mk(env)
+    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 1, "lng": 1, "ts": iso(seconds=50)}, headers=env["V"]).status_code == 201
+    assert c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 2, "lng": 2, "ts": iso()}, headers=env["V"]).status_code == 201
+    assert c.get(f"/vehicles/{env['veh']}/position", headers=env["D"]).json()["lat"] == 2
+
+
+def test_vehicle_create_audited_and_prune_and_body_cap(env):
+    c, db = env["c"], env["db"]
+    assert c.post("/vehicles", json={"operator": "O", "registration": "X-9"}, headers=env["D"]).status_code == 201
+    assert db.execute("SELECT COUNT(*) FROM auth_audit WHERE action='create_vehicle'").fetchone()[0] == 1
+    db.execute("INSERT INTO ping_limit (vehicle_id,last_at) VALUES ('old', 1.0)")
+    db.commit()
+    create_app(env["path"])
+    assert db.execute("SELECT COUNT(*) FROM ping_limit WHERE vehicle_id='old'").fetchone()[0] == 0
+    r = c.post("/missions", content=b"x" * 70000, headers={**env["D"], "content-type": "application/json"})
+    assert r.status_code == 413
