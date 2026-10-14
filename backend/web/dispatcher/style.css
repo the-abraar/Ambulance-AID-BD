@@ -1,18 +1,53 @@
-body{font:14px system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1b1f24}
+body{font:15px/1.4 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1b1f24}
+[hidden]{display:none!important}
 header{display:flex;gap:1rem;align-items:center;padding:.6rem 1rem;background:#8b1a1a;color:#fff;flex-wrap:wrap}
-h1{font-size:1.1rem;margin:0}h2{font-size:1rem}
-main{padding:1rem;display:grid;gap:1rem}
+h1{font-size:1.15rem;margin:0}h2{font-size:1.05rem;margin:.2rem 0 .6rem}
+#missions-sec h2{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+main{padding:1rem;display:grid;gap:1rem;grid-template-columns:minmax(0,1fr)}
+@media (min-width:1100px){main{grid-template-columns:repeat(2,minmax(0,1fr))}#dispatch,#missions-sec{grid-column:1/-1}}
 section{background:#fff;padding:.8rem 1rem;border-radius:6px;overflow-x:auto}
+#dispatch{display:grid;gap:1rem}
+@media (min-width:800px){#dispatch{grid-template-columns:minmax(0,3fr) minmax(16rem,2fr)}}
+#map{height:360px;border-radius:4px}
 form{display:flex;gap:.5rem;flex-wrap:wrap;align-items:end}
-label{display:flex;flex-direction:column;font-size:12px}
-input,select,button{padding:.35rem .5rem;font:inherit}
+#newm{flex-direction:column;align-items:stretch}
+#newm p{margin:0}
+#pairf{margin-top:.6rem}
+label{display:flex;flex-direction:column;font-size:14px;gap:.15rem}
+input,select,button{padding:.4rem .55rem;font:inherit}
 table{border-collapse:collapse;width:100%}
-th,td{text-align:left;padding:.3rem .5rem;border-bottom:1px solid #e3e5e8}
-td button{margin-right:.3rem}
+caption{text-align:left;font-size:13px;color:#555;padding-bottom:.3rem}
+th,td{text-align:left;padding:.3rem .5rem;border-bottom:1px solid #e3e5e8;vertical-align:top}
+td:nth-child(3){max-width:18rem;overflow-wrap:anywhere}
+td button{margin:0 .3rem .2rem 0}
+.acts{white-space:nowrap}
+.acts .danger{margin-left:1.5rem}
+button.danger{background:#b00020;color:#fff;border:1px solid #7a0016;border-radius:4px;font-weight:600}
+button[aria-pressed=true]{background:#1b1f24;color:#fff}
+#sound{margin-left:auto;background:#ffd84d;color:#1b1f24;font-weight:600}
+#sound[aria-pressed=true]{background:#fff;color:#176b2c}
+#alarm{margin:0;padding:.7rem 1rem;background:#b00020;color:#fff;font-weight:700}
+tr.late{background:#fde2e2}
+tr.late td:nth-child(8){color:#8b1a1a;font-weight:700}
+.warn{background:#fff6d6;border-left:4px solid #c99700;padding:.4rem .6rem;font-size:14px}
 .stale{background:#fde2e2;color:#8b1a1a;font-weight:600}
 .fresh{color:#176b2c}
-code{font-size:12px}
-#drawer{position:fixed;top:0;right:0;width:min(380px,100%);height:100%;background:#fff;box-shadow:-2px 0 8px #0003;padding:1rem;overflow:auto}
-#toasts{position:fixed;bottom:1rem;left:1rem;display:grid;gap:.4rem;z-index:10}
-.toast{background:#8b1a1a;color:#fff;padding:.5rem .8rem;border-radius:4px;max-width:420px}
-#newtok{background:#fff6d6;padding:.5rem;word-break:break-all}
+.st-busy{color:#8b1a1a;font-weight:600}.st-free{color:#176b2c;font-weight:600}.st-inactive{color:#666}
+code{font-size:13px}
+#drawer{position:fixed;top:0;right:0;width:min(420px,100%);height:100%;box-sizing:border-box;background:#fff;box-shadow:-2px 0 8px #0003;padding:1rem;overflow:auto;z-index:1001}
+#audit li{margin-bottom:.5rem}
+#toasts{position:fixed;bottom:1rem;left:1rem;display:grid;gap:.4rem;z-index:1002}
+.toast{background:#8b1a1a;color:#fff;padding:.5rem .8rem;border-radius:4px;max-width:min(420px,calc(100vw - 2rem))}
+#newtok{background:#fff6d6;padding:.5rem;word-break:break-all;cursor:pointer}
+dialog{max-width:30rem;border:0;border-radius:8px;box-shadow:0 4px 24px #0005}
+dialog::backdrop{background:#0006}
+dialog form{flex-direction:column;align-items:stretch}
+.dlg-actions{display:flex;justify-content:space-between;gap:3rem;margin-top:1rem}
+.code{font:700 2.4rem/1 ui-monospace,monospace;letter-spacing:.3em;margin:.5rem 0}
+#pair-qr{display:block;max-width:100%;image-rendering:pixelated}
+/* Map markers: CSS wins over the stroke/fill attributes Leaflet writes, so colours live here. */
+path.veh-free{stroke:#0d5c22;fill:#2fa84f;fill-opacity:.95}
+path.veh-busy{stroke:#7a0016;fill:#e0452b;fill-opacity:.95}
+path.veh-stale{stroke:#555;fill:#bbb;fill-opacity:.9;stroke-dasharray:3 3}
+path.acc{stroke:#1d5fbf;fill:#1d5fbf;fill-opacity:.12;stroke-width:1}
+path.pickup{stroke:#1d5fbf;fill:#fff;fill-opacity:1;stroke-width:4}

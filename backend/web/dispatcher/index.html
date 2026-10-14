@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dispatcher Console</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,43 +15,110 @@
     <button>Connect</button>
     <span id="who"></span>
   </form>
+  <button id="sound" type="button" aria-pressed="false">Turn on alarm sound</button>
 </header>
+<p id="alarm" role="alert" hidden></p>
 <main>
-  <section>
-    <h2>New mission</h2>
+  <section id="dispatch">
+    <div id="map" role="application" aria-label="Map of Dhaka. Click to place the pickup point; arrow keys pan."></div>
     <form id="newm">
-      <label>Pickup lat <input name="lat" type="number" step="any" min="-90" max="90" required></label>
-      <label>Pickup lng <input name="lng" type="number" step="any" min="-180" max="180" required></label>
-      <label>Address (optional) <input name="addr"></label>
-      <label>Vehicle <select name="veh"></select></label>
-      <label>Driver <select name="drv"></select></label>
-      <button>Create</button>
+      <h2>New mission</h2>
+      <label>1. Pickup address or landmark
+        <input name="addr" required maxlength="200" placeholder="Road, area, landmark" aria-describedby="addr-warn">
+      </label>
+      <p id="addr-warn" class="warn">No patient names or phone numbers here. The address goes to the driver by SMS and stays in the audit log.</p>
+      <p class="pickup-line">2. Pickup point (gives the driver a Navigate button): <strong id="pickup">not set, click the map</strong>
+        <button type="button" id="centre">Use map centre</button></p>
+      <label>3. Free vehicle (its paired driver goes)
+        <select name="veh" required></select>
+      </label>
+      <button>Dispatch</button>
     </form>
   </section>
-  <section>
+  <section id="missions-sec">
     <h2>Missions
-      <select id="filter" aria-label="Status filter"><option value="">All</option></select>
+      <button type="button" id="tab-active" aria-pressed="true">Active</button>
+      <button type="button" id="tab-history" aria-pressed="false">History</button>
+      <select id="filter" aria-label="Status filter"><option value="">All statuses</option></select>
+      <span id="pager" hidden>
+        <button type="button" id="newer">Newer</button> <span id="page"></span> <button type="button" id="older">Older</button>
+      </span>
     </h2>
-    <table id="missions"><thead><tr><th>ID</th><th>Status</th><th>Pickup</th><th>Vehicle</th><th>Driver</th><th>Updated</th><th>Actions</th></tr></thead><tbody></tbody></table>
+    <table id="missions">
+      <caption>Times are Dhaka time. A mission not acknowledged within 2 minutes turns red.</caption>
+      <thead><tr><th>ID</th><th>Status</th><th>Pickup</th><th>Vehicle</th><th>Driver</th><th>Dispatched</th><th>Elapsed</th><th>Acknowledged</th><th>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </section>
   <section>
     <h2>Vehicles</h2>
-    <form id="newv"><input name="operator" placeholder="Operator" required><input name="registration" placeholder="Registration" required><button>Add vehicle</button></form>
-    <table id="vehicles"><thead><tr><th>Registration</th><th>Operator</th><th>Active</th><th>Last ping</th></tr></thead><tbody></tbody></table>
+    <form id="newv"><input name="operator" placeholder="Operator" required aria-label="Operator"><input name="registration" placeholder="Registration" required aria-label="Registration"><button>Add vehicle</button></form>
+    <form id="pairf">
+      <label>Vehicle <select name="veh" required></select></label>
+      <label>Driver <select name="drv"></select></label>
+      <button>Pair driver with vehicle</button>
+    </form>
+    <table id="vehicles">
+      <thead><tr><th>Registration</th><th>Operator</th><th>State</th><th>Driver</th><th>Last position (Dhaka time)</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </section>
   <section>
     <h2>Drivers</h2>
-    <form id="newd"><input name="name" placeholder="Driver name" required><button>Add driver</button></form>
+    <form id="newd" class="admin-only" hidden>
+      <input name="name" placeholder="Driver name" required maxlength="200" aria-label="Driver name">
+      <input name="phone" placeholder="Phone 01XXXXXXXXX (optional)" inputmode="tel" maxlength="30" aria-label="Driver phone (optional)">
+      <button>Add driver</button>
+    </form>
+    <div id="expiring" class="warn" hidden><strong>Tokens expiring within 7 days (issue a pairing code):</strong><ul></ul></div>
     <p id="newtok" hidden></p>
-    <table id="drivers"><thead><tr><th>Name</th><th>ID</th><th>Token</th></tr></thead><tbody></tbody></table>
+    <table id="drivers">
+      <thead><tr><th>Name</th><th>Phone</th><th>Token</th><th class="admin-only" hidden>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </section>
 </main>
 <aside id="drawer" hidden>
-  <button id="close" aria-label="Close">x</button>
+  <button id="close" type="button" aria-label="Close">x</button>
   <h2>Audit trail</h2>
+  <p id="audit-what"></p>
   <ol id="audit"></ol>
 </aside>
+<dialog id="cancel-dlg" aria-labelledby="cancel-h">
+  <form method="dialog">
+    <h2 id="cancel-h">Cancel this mission?</h2>
+    <p>Pickup: <strong id="cancel-addr"></strong></p>
+    <p>This cannot be undone. The driver's app shows "cancelled" (and an SMS goes if SMS is set up). Phone the driver to confirm.</p>
+    <label>Reason (required) <input name="reason" required maxlength="200" pattern=".*\S.*" autofocus></label>
+    <div class="dlg-actions">
+      <button value="keep" formnovalidate>Keep mission</button>
+      <button value="cancel" class="danger">Cancel mission</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="behalf-dlg" aria-labelledby="behalf-h">
+  <form method="dialog">
+    <h2 id="behalf-h">Record the driver's move</h2>
+    <p><strong id="behalf-what"></strong></p>
+    <p>Only when the driver cannot (dead phone, back-fill after an outage). The audit log records you, acting for the driver.</p>
+    <label>Reason (required) <input name="reason" required maxlength="200" pattern=".*\S.*" autofocus></label>
+    <label>When it happened, Dhaka time (optional, default now) <input name="at" type="datetime-local" step="1"></label>
+    <div class="dlg-actions">
+      <button value="back" formnovalidate>Back</button>
+      <button value="go">Record move</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="pair-dlg" aria-labelledby="pair-h">
+  <h2 id="pair-h">Pair <span id="pair-name"></span>'s phone</h2>
+  <p>On the driver's phone, scan the QR code, or open <code id="pair-url"></code> and type the code. One use, valid until <span id="pair-exp"></span> (Dhaka time).</p>
+  <p id="pair-code" class="code"></p>
+  <canvas id="pair-qr" width="0" height="0" role="img"></canvas>
+  <form method="dialog"><button>Done</button></form>
+</dialog>
 <div id="toasts" role="alert" aria-live="assertive"></div>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/qrcode/qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
