@@ -244,6 +244,27 @@ def run(base, dtok, ctok):
         ok(re.fullmatch(r"\d+:\d\d", cell(6)) and cell(7) == "waiting", f"elapsed and acknowledgement columns ({cell(6)}, {cell(7)})")
         ok(opts() == [["DHK-E2E · Rahim (busy)", True]], "busy vehicle cannot be dispatched twice")
 
+        # N6: back-fill a paper-log mission onto the busy vehicle: written already over, the driver is not alerted
+        t0 = (datetime.now(DHAKA) - timedelta(hours=2)).replace(second=7, microsecond=0)
+        local = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S")
+        con.click("#newm summary")
+        con.fill("#newm [name=addr]", "Paper-log-1")
+        con.fill("#newm [name=dispatched]", local(t0))
+        ok(opts() == [["DHK-E2E · Rahim (busy)", False]], "back-fill: the busy vehicle can be picked")
+        con.select_option("#newm [name=veh]", label="DHK-E2E · Rahim (busy)")
+        con.fill("#newm [name=bf_AT_SCENE]", local(t0 + timedelta(minutes=12)))
+        con.fill("#newm [name=bf_end_at]", local(t0 + timedelta(minutes=50)))
+        shot(con, "console_1280_backfill.png", "console 1280x800, back-fill form: a paper-log mission on the busy vehicle, step times")
+        con.click("#newm button:has-text('Dispatch')")
+        wait(con, "!document.querySelector('#newm [name=dispatched]').value")
+        bf = next(x for x in api(base, dtok, "/missions") if x["pickup_address"] == "Paper-log-1")
+        ok(bf["status"] == "COMPLETED" and dhaka(bf["created_at"]) == t0.strftime("%Y-%m-%d %H:%M:%S")
+           and bf["en_route_pickup_at"] is None and dhaka(bf["at_scene_at"]) == (t0 + timedelta(minutes=12)).strftime("%Y-%m-%d %H:%M:%S")
+           and dhaka(bf["completed_at"]) == (t0 + timedelta(minutes=50)).strftime("%Y-%m-%d %H:%M:%S"),
+           "back-fill recorded COMPLETED with the paper log's Dhaka times; an empty step stays unknown")
+        ok(api(base, dr_tok, "/missions/current")["mission_id"] == m1["mission_id"] and opts() == [["DHK-E2E · Rahim (busy)", True]],
+           "back-fill: the driver still sees only his live mission; the form resets and the vehicle is busy again")
+
         # the driver (played through the API) acknowledges and sends one fix with accuracy
         ack = call(base, "POST", f"/missions/{m1['mission_id']}/ack", dr_tok)
         call(base, "POST", f"/vehicles/{veh_id}/pings", dr_tok, {"lat": 23.78, "lng": 90.41, "ts": utcnow(), "accuracy": 35})

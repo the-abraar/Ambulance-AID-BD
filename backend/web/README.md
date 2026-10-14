@@ -32,8 +32,12 @@ Plain HTML/CSS/JS, no build. Sign in with a dispatcher or admin token (`python -
   after 2 minutes turns red and raises a banner. It also beeps on every poll, once "Turn on alarm sound" has been
   clicked (browsers allow audio only after a click).
 - **Cancel:** a dialog shows the address, a reason is required, and the red button stands apart. Enter keeps the mission.
-- **On behalf:** for a driver who cannot tap (dead phone, back-fill after an outage). "On behalf: <next step>" asks for a
-  reason (required) and when it happened (optional, Dhaka time). The audit records you acting for the driver.
+- **On behalf:** for a driver who cannot tap (dead phone, radio call). "On behalf: <next step>" asks for a reason
+  (required) and when it happened (optional, Dhaka time, not before the previous step). The audit records you acting
+  for the driver.
+- **Back-fill from a paper log** (in the new-mission form, after an outage): the dispatch time, each step's time (empty
+  if the log has none), how it ended and when. The mission is recorded already over, so a busy vehicle may be picked
+  and the driver is not alerted.
 - **Times:** Dhaka time (UTC+6) everywhere, including the audit drawer, whatever the PC's time zone.
 - **Vehicles:** any dispatcher pairs a driver with a vehicle ("Pair driver with vehicle"; "(nobody)" unpairs).
 - **Drivers:** everyone sees the phone, the token state (valid until, revoked, expired) and a list of tokens expiring
@@ -65,8 +69,6 @@ files. `scripts/lint-innerhtml.sh` skips `vendor/`: minified Leaflet is not ours
 - Background tabs throttle timers (Chrome may poll once a minute after 5 minutes hidden), so the alarm can be late.
   Keep the console tab visible.
 - Tables re-render on every poll, so keyboard focus inside a table is lost every 5 s.
-- Back-filling an outage: the API accepts an event time only between the mission's creation and now, so a mission
-  entered after the outage cannot carry earlier real times.
 
 ## Driver app (`driver/`)
 

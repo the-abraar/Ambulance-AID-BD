@@ -92,24 +92,25 @@ def test_sms_disabled_without_env_or_phone(env, gateway, monkeypatch):
     assert got == [] and sms_rows(env) == []
 
 
-def test_backfill_keeps_step_order_and_never_pages_the_driver(env, gateway):
-    """Paper-log back-fill: the real dispatch time becomes created_at, steps only move forward, no SMS goes out."""
+def test_backfill_never_pages_the_driver_and_on_behalf_steps_keep_order(env, gateway):
+    """A paper-log back-fill sends no SMS; on-behalf event times never precede the dispatch or the previous step."""
     from tests.test_api import iso
     got, _ = gateway
     with_phone(env)
     c, D = env["c"], env["D"]
-    assert c.post("/missions", json={"pickup_address": "x", "assigned_vehicle_id": env["veh"],
-                                     "dispatched_at": iso(days=-8)}, headers=D).status_code == 422  # outside 7 days
-    m = mk(env, dispatched_at=iso(hours=-3))
-    assert got == [] and sms_rows(env) == []  # the driver is not alerted for a mission that is already over
+    r = c.post("/missions", json={"pickup_address": "x", "assigned_vehicle_id": env["veh"], "dispatched_at": iso(hours=-3),
+                                  "steps": [{"status": "CANCELLED", "at": iso(hours=-2)}]}, headers=D)
+    assert r.status_code == 201 and got == [] and sms_rows(env) == []  # already over: the driver is not alerted
+    m = mk(env)
+    from datetime import timedelta
+    from app.db import now
+    env["db"].execute("UPDATE missions SET created_at=? WHERE id=?", (now(timedelta(hours=-3)), m)); env["db"].commit()  # 3 h ago
     p = f"/missions/{m}/status"
-    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP", "reason": "outage, paper log", "event_time": iso(hours=-4)},
+    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP", "reason": "phone dead", "event_time": iso(hours=-4)},
                    headers=D).status_code == 422  # before the dispatch time
-    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP", "reason": "outage, paper log", "event_time": iso(hours=-2)},
+    assert c.patch(p, json={"status": "EN_ROUTE_PICKUP", "reason": "phone dead", "event_time": iso(hours=-2)},
                    headers=D).status_code == 200
-    assert c.patch(p, json={"status": "AT_SCENE", "reason": "outage, paper log", "event_time": iso(hours=-2, minutes=-10)},
+    assert c.patch(p, json={"status": "AT_SCENE", "reason": "phone dead", "event_time": iso(hours=-2, minutes=-10)},
                    headers=D).status_code == 422  # before the previous step
-    r = c.patch(p, json={"status": "AT_SCENE", "reason": "outage, paper log", "event_time": iso(hours=-1)}, headers=D)
+    r = c.patch(p, json={"status": "AT_SCENE", "reason": "phone dead", "event_time": iso(hours=-1)}, headers=D)
     assert r.status_code == 200 and r.json()["created_at"] < r.json()["en_route_pickup_at"] < r.json()["at_scene_at"]
-    first = c.get(f"/missions/{m}/audit", headers=D).json()[0]
-    assert first["reason"] == "back-fill" and first["event_time"] == r.json()["created_at"] and first["ts"] > first["event_time"]

@@ -32,7 +32,7 @@ ACTIVE_SQL = f"status NOT IN ({','.join('?' * len(TERMINAL))})"  # bind *TERMINA
 STALE_S = 120  # a position older than this is shown as stale (same as the console's STALE_MS)
 IDLE_PING_S = 30  # between missions a vehicle keeps at most one position per 30 s (the wrapper sends one a minute)
 RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission this long, so the driver sees why
-BACKFILL_WINDOW = timedelta(days=7)  # an on-behalf event_time may predate the mission: paper-log missions are entered after the outage
+BACKFILL_WINDOW = timedelta(days=7)  # how far back a paper-log back-fill or an on-behalf event_time may go
 PAIR_CODE_TTL = timedelta(minutes=10)
 # Wrong /pair codes in a sliding 10-minute window. Per client, so one room's typos never block another (and a success
 # clears that client's count); globally, so at most 50 guesses fall in a code's 10-minute life: 1 in 20,000 for a
@@ -174,18 +174,27 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     Phone = Annotated[str, StringConstraints(max_length=30), AfterValidator(bd_phone)]
 
+    class StepIn(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        status: State
+        at: AwareDatetime | None = None  # null: the paper log has no time for this step
+
     class MissionIn(BaseModel):
         pickup_address: Text
         assigned_vehicle_id: str | None = None
         assigned_driver_id: str | None = None  # omitted: taken from the vehicle's paired driver
         pickup_lat: float | None = Field(None, ge=-90, le=90)
         pickup_lng: float | None = Field(None, ge=-180, le=180)
-        dispatched_at: AwareDatetime | None = None  # paper-log back-fill: the real dispatch time; the driver is not alerted
+        # Paper-log back-fill: the real dispatch time and every later step, so the mission is recorded already over.
+        dispatched_at: AwareDatetime | None = None
+        steps: list[StepIn] | None = Field(None, min_length=1, max_length=len(State))
 
         @model_validator(mode="after")
         def both_or_neither(self):
             if (self.pickup_lat is None) != (self.pickup_lng is None):
                 raise ValueError("pickup_lat and pickup_lng must be given together")
+            if (self.dispatched_at is None) != (self.steps is None):
+                raise ValueError("dispatched_at and steps must be given together (paper-log back-fill)")
             return self
 
     class StatusIn(BaseModel):
@@ -262,26 +271,57 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             if not v:
                 raise HTTPException(422, "driver has no vehicle: pair one (PUT /vehicles/{id}/driver) or pass assigned_vehicle_id")
             vid = v["id"]
+        if body.steps:
+            return backfill(db, u, body, vid, did)
         if did:
             assignable(db, did)
         if db.execute(f"SELECT 1 FROM missions WHERE {ACTIVE_SQL} AND (assigned_vehicle_id=? OR assigned_driver_id=?)",
                       (*TERMINAL, vid, did)).fetchone():
             raise HTTPException(409, "vehicle or driver already has an active mission")
         mid, t = str(uuid.uuid4()), now()
-        at = body.dispatched_at and body.dispatched_at.astimezone(timezone.utc).isoformat(timespec="microseconds")
-        if at and not now(-BACKFILL_WINDOW) <= at <= t:
-            raise HTTPException(422, "dispatched_at must lie within the last 7 days and not in the future")
         try:  # the partial unique indexes (migration 0006) stop two dispatchers racing past the check above
             db.execute("INSERT INTO missions (id,status,pickup_address,assigned_vehicle_id,assigned_driver_id,created_at,"
                        "updated_at,pickup_lat,pickup_lng) VALUES (?,?,?,?,?,?,?,?,?)",
-                       (mid, INITIAL.value, body.pickup_address, vid, did, at or t, t, body.pickup_lat, body.pickup_lng))
+                       (mid, INITIAL.value, body.pickup_address, vid, did, t, t, body.pickup_lat, body.pickup_lng))
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, "vehicle or driver already has an active mission")
-        audit(db, mid, u["id"], None, INITIAL.value, t, reason="back-fill" if at else None, event_time=at)
+        audit(db, mid, u["id"], None, INITIAL.value, t)
         db.commit()
-        if did and not at:  # a back-filled mission is already over: never page the driver for it
+        if did:
             bg.add_task(notify_driver, mid, "create")
+        return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
+
+    def backfill(db: Conn, u: dict, body: MissionIn, vid: str | None, did: str | None) -> dict:
+        # A paper-log mission is written in one go, already over: it is never active, so it needs no free vehicle, never
+        # alerts the driver (no SMS, no app alarm) and never raises the ack alarm. Each step is audited with its time.
+        t, utc = now(), lambda d: d and d.astimezone(timezone.utc).isoformat(timespec="microseconds")
+        state, prev, steps = INITIAL, utc(body.dispatched_at), []
+        if not now(-BACKFILL_WINDOW) <= prev <= t:
+            raise HTTPException(422, "dispatched_at must lie within the last 7 days and not in the future")
+        for st in body.steps:
+            try:
+                state = transition(state, st.status)
+            except InvalidTransition as e:
+                raise HTTPException(422, f"back-fill steps: {e}")
+            at = utc(st.at)
+            if at and not prev <= at <= t:  # step times only move forward, or response-time figures come out negative
+                raise HTTPException(422, "back-fill step times must not precede the previous step or lie in the future")
+            prev = at or prev
+            steps.append((state, at))
+        if state.value not in TERMINAL or not steps[-1][1]:
+            raise HTTPException(422, "back-fill steps must end in COMPLETED or CANCELLED, with its time")
+        mid, cols = str(uuid.uuid4()), "".join(f",{s.value.lower()}_at" for s, _ in steps)  # names from the State enum
+        db.execute(f"INSERT INTO missions (id,status,pickup_address,assigned_vehicle_id,assigned_driver_id,created_at,"
+                   f"updated_at,pickup_lat,pickup_lng{cols}) VALUES ({','.join('?' * (9 + len(steps)))})",
+                   (mid, state.value, body.pickup_address, vid, did, utc(body.dispatched_at), prev, body.pickup_lat,
+                    body.pickup_lng, *(a for _, a in steps)))
+        audit(db, mid, u["id"], None, INITIAL.value, t, reason="back-fill", event_time=utc(body.dispatched_at))
+        src = INITIAL
+        for s, a in steps:
+            audit(db, mid, u["id"], src.value, s.value, t, did if on_behalf(u["role"], s) else None, "back-fill", a)
+            src = s
+        db.commit()
         return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
 
     @app.get("/missions")

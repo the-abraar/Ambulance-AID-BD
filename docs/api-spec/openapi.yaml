@@ -64,15 +64,18 @@ paths:
         A vehicle alone takes the vehicle's paired driver (send assigned_driver_id null for none). A driver alone takes
         the driver's paired vehicle (422 if none). If the driver has a phone and SMS is configured, a text goes out
         after the response; it never delays or fails the create. 30 creates per minute per token.
+        Paper-log back-fill (dispatched_at with steps): the mission is written already over, in COMPLETED or CANCELLED.
+        It is never active, so a busy vehicle and a revoked driver are fine, and nobody is alerted (no SMS, no app
+        alarm). Each step is audited with reason "back-fill", its time, and on_behalf_of for the driver's steps.
       operationId: createMission
       security: [{BearerAuth: []}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/MissionCreateRequest'}}}
       responses:
-        '201': {description: Created in DISPATCHED., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
-        '409': {description: The vehicle or driver already has an active mission.}
-        '422': {description: "Unknown or inactive vehicle, unknown/revoked/expired driver, driver without vehicle, invalid body."}
+        '201': {description: "Created in DISPATCHED (back-fill: in its last step)", content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '409': {description: The vehicle or driver already has an active mission (not for back-fill).}
+        '422': {description: "Unknown or inactive vehicle, unknown/revoked/expired driver, driver without vehicle, invalid body, impossible back-fill timeline."}
         '429': {description: Create rate limit.}
 
   /missions/current:
@@ -103,7 +106,7 @@ paths:
       summary: Move a mission to its next status
       description: >
         The assigned driver makes the forward moves; a dispatcher cancels (DISPATCHED, EN_ROUTE_PICKUP, AT_SCENE only).
-        A dispatcher may also make any legal forward move for the driver (dead phone, back-fill after an outage): reason
+        A dispatcher may also make any legal forward move for the driver (dead phone, radio call): reason
         is then required, event_time (when it really happened) is optional, and the audit row records the dispatcher as
         user_id with on_behalf_of = the assigned driver. Drivers may not send reason or event_time. Unknown fields are 422.
       operationId: updateMissionStatus
@@ -430,7 +433,22 @@ components:
         dispatched_at:
           type: [string, "null"]
           format: date-time
-          description: Paper-log back-fill only. The real dispatch time (within the last 7 days, not in the future); it becomes created_at, the audit keeps the entry time, and the driver is not alerted.
+          description: Paper-log back-fill only, with steps. The real dispatch time (within the last 7 days, not in the future); it becomes created_at, the audit keeps the entry time.
+        steps:
+          type: [array, "null"]
+          minItems: 1
+          maxItems: 7
+          description: >
+            Paper-log back-fill only, with dispatched_at. Every step after DISPATCHED in order, along the state machine,
+            ending in COMPLETED or CANCELLED. at null means the log has no time for that step; the others must not
+            precede the previous known time or lie in the future, and the last step needs its time.
+          items:
+            type: object
+            additionalProperties: false
+            required: [status]
+            properties:
+              status: {$ref: '#/components/schemas/MissionStatus'}
+              at: {type: [string, "null"], format: date-time}
         pickup_lng:
           type: [number, "null"]
           minimum: -180

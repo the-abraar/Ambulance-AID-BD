@@ -36,8 +36,9 @@ answers only after the pool's 30 s connection timeout.
 - **driver**: status moves, pings and `POST /missions/{id}/ack`, only for the mission assigned to them; on shift,
   also pings for the paired vehicle between missions.
 - **dispatcher**: creates, lists and cancels missions; pairs drivers with vehicles; may make a driver's forward move
-  for them (dead phone, back-fill after an outage) with a required `reason` and optional `event_time`; the audit row
-  then holds the dispatcher as `user_id` and the driver as `on_behalf_of`.
+  for them (dead phone) with a required `reason` and optional `event_time`; the audit row then holds the dispatcher as
+  `user_id` and the driver as `on_behalf_of`. Back-fills paper-log missions after an outage: `POST /missions` with
+  `dispatched_at` and `steps` writes the mission already over (no busy check, no SMS, no app alarm).
 - **admin** = a dispatcher with `users.admin` set: also creates users, mints, rotates and revokes tokens, and issues
   pairing codes. `GET /me` returns `admin`.
 
