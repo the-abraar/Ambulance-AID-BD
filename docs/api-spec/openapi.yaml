@@ -235,7 +235,10 @@ paths:
     post:
       summary: Driver GPS ping
       description: >
-        Only the driver assigned to an active mission using this vehicle. The phone clock may be wrong: the server
+        The driver assigned to an active mission using this vehicle. Between missions, with on_shift true, also the
+        driver paired with this vehicle, if it is in service and neither it nor he is on another mission; the server
+        then keeps at most one position per 30 s and answers 201 with stored false for the rest. Off shift, unpaired or
+        signed out: 403 or 401, nothing kept. The phone clock may be wrong: the server
         stores its own receive time (minus the fix's age when sent_at is given, e.g. for pings queued offline) and
         returns the measured clock skew. Rejects (0, 0), fixes older than 300 s, and jumps faster than 250 km/h beyond
         1 km plus the reported accuracies (compared with a fix from the last 10 minutes). 429 if faster than once per second.
@@ -247,8 +250,8 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/PingRequest'}}}
       responses:
-        '201': {description: Stored., content: {application/json: {schema: {$ref: '#/components/schemas/PingResult'}}}}
-        '403': {description: Not the assigned driver/vehicle.}
+        '201': {description: Accepted (see stored)., content: {application/json: {schema: {$ref: '#/components/schemas/PingResult'}}}}
+        '403': {description: "Not the assigned driver/vehicle, and not on shift as its paired driver."}
         '422': {description: "Invalid body, (0, 0), old fix or impossible jump."}
         '429': {description: Rate limited.}
 
@@ -492,7 +495,8 @@ components:
         admin: {type: boolean, description: May create users and mint/rotate/revoke tokens.}
         token_expires_at: {type: [string, "null"], format: date-time}
         driver_id: {type: string}
-        vehicle_id: {type: [string, "null"]}
+        vehicle_id: {type: [string, "null"], description: Driver only. The active mission's vehicle.}
+        paired_vehicle_id: {type: [string, "null"], description: "Driver only. The in-service vehicle paired with him; an on-shift wrapper reports it between missions."}
 
     TokenRotated:
       type: object
@@ -634,13 +638,15 @@ components:
         ts: {type: string, format: date-time, description: "When the fix was taken (phone clock, with timezone)."}
         sent_at: {type: string, format: date-time, description: Phone clock when sent; with ts it gives the fix's age.}
         accuracy: {type: number, minimum: 0, maximum: 100000, description: Metres (coords.accuracy).}
+        on_shift: {type: boolean, default: false, description: "Set by the Android wrapper while the driver is on shift: allows pings between missions."}
 
     PingResult:
       type: object
       additionalProperties: false
-      required: [ok, clock_skew_s]
+      required: [ok, stored, clock_skew_s]
       properties:
         ok: {type: boolean}
+        stored: {type: boolean, description: "False when a between-missions ping came within 30 s of the last kept one."}
         clock_skew_s: {type: number, description: "Phone clock minus server clock, seconds. Warn the driver above 60."}
 
     VehiclePosition:

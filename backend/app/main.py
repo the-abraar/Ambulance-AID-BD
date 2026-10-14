@@ -30,6 +30,7 @@ PING_LIMIT_KEEP_S = 86400
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
 ACTIVE_SQL = f"status NOT IN ({','.join('?' * len(TERMINAL))})"  # bind *TERMINAL after it
 STALE_S = 120  # a position older than this is shown as stale (same as the console's STALE_MS)
+IDLE_PING_S = 30  # between missions a vehicle keeps at most one position per 30 s (the wrapper sends one a minute)
 RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission this long, so the driver sees why
 BACKFILL_WINDOW = timedelta(days=7)  # an on-behalf event_time may predate the mission: paper-log missions are entered after the outage
 PAIR_CODE_TTL = timedelta(minutes=10)
@@ -199,6 +200,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         ts: AwareDatetime
         sent_at: AwareDatetime | None = None  # phone clock at send time; with ts it gives the fix's age, whatever the skew
         accuracy: float | None = Field(None, ge=0, le=100_000)
+        on_shift: bool = False  # the wrapper's shift mode: between missions the paired driver still reports the vehicle
 
     def out(row) -> dict:
         d = dict(row)
@@ -311,6 +313,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             r["driver_id"] = u["driver_id"]
             m = current_row(db, u["driver_id"])
             r["vehicle_id"] = m["assigned_vehicle_id"] if m else None
+            v = db.execute("SELECT id FROM vehicles WHERE driver_id=? AND active", (u["driver_id"],)).fetchone()
+            r["paired_vehicle_id"] = v["id"] if v else None  # what an on-shift wrapper reports between missions
         return r
 
     def current_row(db: Conn, did: str, recent_s: float = 0):
@@ -506,9 +510,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.post("/vehicles/{vid}/pings", status_code=201)
     def ping(vid: str, body: PingIn, u: dict = Depends(driver_only), db: Conn = Depends(get_db)):
-        if not db.execute(f"SELECT 1 FROM missions WHERE assigned_driver_id=? AND assigned_vehicle_id=? AND {ACTIVE_SQL}",
-                          (u["driver_id"], vid, *TERMINAL)).fetchone():
-            raise HTTPException(403, "no active mission for this driver and vehicle")
+        mission = db.execute(f"SELECT 1 FROM missions WHERE assigned_driver_id=? AND assigned_vehicle_id=? AND {ACTIVE_SQL}",
+                             (u["driver_id"], vid, *TERMINAL)).fetchone()
+        # Between missions only the driver paired with an in-service, free vehicle reports it, and only on shift: never
+        # when unpaired, signed out or off shift (the consent draft promises this), and never two drivers for one vehicle.
+        if not mission and not (body.on_shift and db.execute(
+                f"SELECT 1 FROM vehicles v WHERE v.id=? AND v.driver_id=? AND v.active AND NOT EXISTS (SELECT 1 FROM "
+                f"missions m WHERE m.{ACTIVE_SQL} AND (m.assigned_vehicle_id=v.id OR m.assigned_driver_id=?))",
+                (vid, u["driver_id"], *TERMINAL, u["driver_id"])).fetchone()):
+            raise HTTPException(403, "no active mission for this driver and vehicle, and not on shift in it")
         # The phone clock may be wrong (manual time, dead RTC): store the server receive time, minus the fix's age when
         # the phone says how old it is (queued offline), and return the skew so the app can warn the driver.
         n = datetime.now(timezone.utc)
@@ -535,10 +545,13 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             except IntegrityError:
                 db.rollback()
                 raise HTTPException(429, "ping rate limit")
-        db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts,accuracy) VALUES (?,?,?,?,?)",
-                   (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds"), body.accuracy))
+        # Between missions keep one position per IDLE_PING_S and answer 201 anyway, so the phone moves on (no retries).
+        stored = bool(mission) or not last or (ts - datetime.fromisoformat(last["ts"])).total_seconds() >= IDLE_PING_S
+        if stored:
+            db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts,accuracy) VALUES (?,?,?,?,?)",
+                       (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds"), body.accuracy))
         db.commit()
-        return {"ok": True, "clock_skew_s": round(((body.sent_at or body.ts) - n).total_seconds(), 1)}
+        return {"ok": True, "stored": stored, "clock_skew_s": round(((body.sent_at or body.ts) - n).total_seconds(), 1)}
 
     @app.get("/vehicles/{vid}/position")
     def position(vid: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):

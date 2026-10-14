@@ -95,7 +95,7 @@ function renderMap() {
 function renderVehicles() {
   fill($("vehicles").tBodies[0], vehicles.map((v) => {
     const p = v.last_position, state = !v.active ? "inactive" : v.busy ? "busy" : "free";
-    // Idle vehicles send no pings, so an old position is red only while the vehicle is on a mission.
+    // Free vehicles report only while their driver is on shift in the Android app, so an old position is red only on a mission.
     const pos = p ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${p.accuracy != null ? ` ±${Math.round(p.accuracy)} m` : ""} at ${dhaka(p.ts)}${p.stale ? " (STALE)" : ""}`
       : "no position yet";
     return h("tr", {}, td(v.registration), td(v.operator), td(state, { className: "st-" + state }), td(driverName(v.driver_id)),

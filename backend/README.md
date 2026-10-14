@@ -33,7 +33,8 @@ answers only after the pool's 30 s connection timeout.
 
 ## Roles
 
-- **driver**: status moves, pings and `POST /missions/{id}/ack`, only for the mission assigned to them.
+- **driver**: status moves, pings and `POST /missions/{id}/ack`, only for the mission assigned to them; on shift,
+  also pings for the paired vehicle between missions.
 - **dispatcher**: creates, lists and cancels missions; pairs drivers with vehicles; may make a driver's forward move
   for them (dead phone, back-fill after an outage) with a required `reason` and optional `event_time`; the audit row
   then holds the dispatcher as `user_id` and the driver as `on_behalf_of`.
@@ -64,6 +65,10 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
 - Pings: the phone clock may be wrong. The server stores its receive time (minus the fix's age when `sent_at` is sent)
   and returns `clock_skew_s`. It rejects (0, 0), fixes older than 300 s, and jumps faster than 250 km/h beyond 1 km
   plus the reported `accuracy`. 1 ping/s per vehicle (DB-backed, holds across workers).
+- Pings between missions (free vehicles on the map): only with `on_shift: true` (the Android wrapper's shift mode),
+  only from the driver paired with the vehicle, only while the vehicle is in service and neither it nor he is on
+  another mission. The server keeps one position per 30 s and answers the rest 201 with `stored: false`. Unpaired,
+  off shift or signed out: nothing is kept. `GET /me` gives a driver `paired_vehicle_id`.
 - Creates (missions, drivers, users): 30 per minute per token.
 - Driver phone: `01XXXXXXXXX`, `8801...`, `+8801...`, Bangla digits, spaces and hyphens accepted; stored as
   `+8801XXXXXXXXX`; anything else is 422.
