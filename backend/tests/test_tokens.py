@@ -2,6 +2,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from datetime import datetime, timezone
 
+from fastapi.testclient import TestClient
+
+from app.main import PAIR_CLIENT_FAILS, PAIR_CODE_TTL, PAIR_GLOBAL_FAILS, PAIR_WINDOW_S
 from tests.test_api import env, iso, mk  # noqa: F401
 
 
@@ -201,13 +204,49 @@ def test_pairing_code_expires_and_revoke_kills_it(env):
     assert c.post("/pair", json={"code": code}).status_code == 200
 
 
-def test_pairing_code_dies_after_5_bad_tries_and_client_limit(env):
-    c, D = env["c"], env["D"]
-    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]
-    wrong = lambda i: f"{(int(code) + 1 + i) % 10 ** 6:06d}"
-    assert [c.post("/pair", json={"code": wrong(i)}).status_code for i in range(5)] == [401] * 5
-    assert c.post("/pair", json={"code": code}).status_code == 401  # the right code is dead now
-    codes = [c.post("/pair", json={"code": wrong(i)}).status_code for i in range(5, 10)]
-    assert codes == [401] * 4 + [429]  # the 11th try after 10 failures from one client: locked out for a while
-    fresh = c.post(f"/drivers/{env['drv2']}/pairing-code", headers=D).json()["code"]
-    assert c.post("/pair", json={"code": fresh}).status_code == 429  # even with a good code, until the window passes
+def phone(env, ip):
+    """A client at its own IP address (the per-client limit keys on it)."""
+    return TestClient(env["app"], client=(ip, 50000))
+
+
+def code_for(env, did):
+    return env["c"].post(f"/drivers/{did}/pairing-code", headers=env["D"]).json()["code"]
+
+
+def wrong_codes(n, *live):
+    return [c for c in (f"{i:06d}" for i in range(n + len(live))) if c not in live][:n]
+
+
+def test_n4_wrong_codes_never_kill_other_drivers_codes(env):
+    a, b = code_for(env, env["drv"]), code_for(env, env["drv2"])
+    bad = phone(env, "198.51.100.7")
+    tries = [bad.post("/pair", json={"code": w}).status_code for w in wrong_codes(PAIR_CLIENT_FAILS + 1, a, b)]
+    assert tries == [401] * PAIR_CLIENT_FAILS + [429]  # that client is blocked for a while ...
+    assert bad.post("/pair", json={"code": a}).status_code == 429  # ... even with a good code
+    assert phone(env, "203.0.113.9").post("/pair", json={"code": a}).status_code == 200  # everyone else's codes live on
+    assert phone(env, "203.0.113.10").post("/pair", json={"code": b}).status_code == 200
+
+
+def test_n4_one_office_ip_survives_onboarding_day_typos(env):
+    office = phone(env, "203.0.113.5")
+    for i in range(15):  # 15 drivers on the office Wi-Fi; each mistypes once, then gets it right
+        did = env["c"].post("/drivers", json={"name": f"d{i}"}, headers=env["D"]).json()["driver_id"]
+        code = code_for(env, did)
+        assert office.post("/pair", json={"code": wrong_codes(1, code)[0]}).status_code == 401
+        assert office.post("/pair", json={"code": code}).status_code == 200, i
+    code = code_for(env, env["drv"])  # a success clears the office's count: 19 typos in a row still leave a try
+    assert [office.post("/pair", json={"code": w}).status_code for w in wrong_codes(19, code)] == [401] * 19
+    assert office.post("/pair", json={"code": code}).status_code == 200
+
+
+def test_n4_global_cap_keeps_guessing_infeasible(env):
+    code = code_for(env, env["drv"])
+    for i, w in enumerate(wrong_codes(PAIR_GLOBAL_FAILS, code)):  # a distributed guesser: one try per address
+        assert phone(env, f"192.0.2.{i}").post("/pair", json={"code": w}).status_code == 401
+    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 429  # paused for everyone
+    env["db"].execute("UPDATE rate_events SET at=at-?", (PAIR_WINDOW_S + 1,)); env["db"].commit()
+    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 200  # paused, never killed
+    # The numbers: a code lives no longer than one window, so at most PAIR_GLOBAL_FAILS guesses can hit it.
+    assert PAIR_CODE_TTL.total_seconds() <= PAIR_WINDOW_S
+    assert PAIR_GLOBAL_FAILS / 10 ** 6 <= 1 / 20_000  # chance that a guesser takes over a given code
+    assert PAIR_CLIENT_FAILS >= 15  # an onboarding room gets more typos than it has drivers

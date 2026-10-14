@@ -49,8 +49,12 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
 
 - Tokens: 256-bit random, stored as SHA-256, expire 90 days after last use (sliding; written at most once a day).
 - Pairing: `POST /drivers/{id}/pairing-code` (admin) gives a 6-digit code, single use, 10 minutes, stored hashed. The
-  driver app sends it to `POST /pair` (no auth) and gets `{token, user}`; the old token stops working. Each wrong code
-  counts against every live code (dead after 5); one client gets 10 wrong codes per 10 minutes. Revoke kills live codes.
+  driver app sends it to `POST /pair` (no auth) and gets `{token, user}`; the old token stops working. Wrong codes never
+  kill anyone's code: one client (IP address) gets 20 wrong codes per 10 minutes, and a success clears its count, so an
+  office pairing 15 drivers survives their typos; all clients together get 50 per 10 minutes, so at most 50 guesses
+  fall in a code's life (1 in 20,000). Past that, `/pair` answers 429 to everyone until the window passes and logs a
+  warning; an attacker can pause pairing this way but not take over a code (fallback: the admin's "Show token").
+  Revoke kills live codes.
 - One active mission per vehicle and per driver (409), enforced by partial unique indexes as well as the check.
   A mission with a driver needs a vehicle: give a vehicle alone (its paired driver is used) or a driver alone (his
   paired vehicle is used).
