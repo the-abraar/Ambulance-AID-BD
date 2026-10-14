@@ -1,25 +1,67 @@
-# UNTESTED: written without a running Docker daemon (only `docker compose config` was checked).
+# Run end to end on a laptop on 2026-10-14 (see docs/deploy.md); not yet run on a real host.
 # Needs a .env next to this file; see .env.example. Caddy gets a TLS certificate for $DOMAIN automatically,
 # so DNS for $DOMAIN must point at this host and ports 80/443 must be open (HTTPS is required for phone GPS).
 services:
   db:
     image: postgres:16
     restart: unless-stopped
+    # Refuse the .env.example placeholders, short passwords, and characters that would break the postgresql:// URLs.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        for p in "$$POSTGRES_PASSWORD" "$$APP_DB_PASSWORD"; do
+          case "$$p" in *change-me*|*[!A-Za-z0-9]*) echo "refusing to start: set real passwords in .env (openssl rand -hex 32)" >&2; exit 1;; esac
+          [ $${#p} -ge 24 ] || { echo "refusing to start: passwords in .env must be at least 24 characters" >&2; exit 1; }
+        done
+        exec docker-entrypoint.sh postgres
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       POSTGRES_DB: ambulance
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U postgres -d ambulance"]
       interval: 5s
       retries: 10
-  app:
+  migrate:  # one-shot, as the owner: migrations, then least-privilege grants for the app role (ops/migrate.py)
     build: ./backend
-    restart: unless-stopped
+    image: ambulance-aid-bd
+    restart: "no"
+    command: [python, /ops/migrate.py]
     environment:
       AMBULANCE_DB_PATH: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/ambulance
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      PYTHONPATH: /srv
+    volumes: [./ops:/ops:ro]
     depends_on:
       db: {condition: service_healthy}
+  app:
+    build: ./backend
+    image: ambulance-aid-bd
+    restart: unless-stopped
+    environment:
+      AMBULANCE_DB_PATH: postgresql://ambulance_app:${APP_DB_PASSWORD}@db:5432/ambulance
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  backup:  # nightly pg_dump into ./backups, newest 14 kept (ops/backup.sh); restore with ops/restore.sh
+    image: postgres:16
+    restart: unless-stopped
+    entrypoint: [bash, /ops/backup.sh]
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ambulance
+    volumes: [./ops:/ops:ro, ./backups:/backups]
+    depends_on:
+      migrate: {condition: service_completed_successfully}  # so the first dump already has the schema
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -29,7 +71,8 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-    depends_on: [app]
+    depends_on:
+      app: {condition: service_healthy}
 volumes:
   pgdata:
   caddy_data:
