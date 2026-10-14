@@ -42,7 +42,7 @@ What is stored (current backend):
 - Users (dispatcher, driver): name/handle, role, hashed token. No plaintext tokens.
 - Vehicles and drivers: registration label, operator, driver identity link.
 - Missions: id (UUID), assigned driver and vehicle, status, timestamps.
-- GPS pings: vehicle position and timestamp, tied to a non-terminal mission.
+- GPS pings: vehicle position and timestamp, during a mission, and between missions while the driver is on shift in the Android app (one kept per 30 s, from the driver paired with that vehicle only). Exact rules: `docs/driver-consent-bn-draft.md` point 2.
 - Audit log: who changed which mission from which state to which state, and when.
 - Not collected in the pilot: patient names, vitals, medical condition, caller phone numbers. Do not add them without a legal opinion and consent text.
 

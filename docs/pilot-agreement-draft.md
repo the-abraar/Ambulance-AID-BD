@@ -48,7 +48,7 @@ Further terms:
 
 - The operator is the **controller**: it decides why and how driver and mission data are used.
 - The provider is the **processor**: it processes the data only on the operator's instructions, to run the pilot.
-- The data is listed in `docs/pilot-plan.md` section 3: users, drivers (name, optional phone), vehicles, missions with free-text pickup addresses, GPS pings during missions, and audit logs.
+- The data is listed in `docs/pilot-plan.md` section 3: users, drivers (name, optional phone), vehicles, missions with free-text pickup addresses, GPS pings during missions and, while a driver is on shift, between missions, and audit logs.
 - No patient names, conditions or caller numbers. Dispatchers must not type them into the address field.
 - Retention:
   - GPS pings are deleted after 90 days; backups are kept 14 days.

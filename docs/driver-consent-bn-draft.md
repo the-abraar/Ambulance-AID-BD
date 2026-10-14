@@ -2,7 +2,7 @@
 
 **DRAFT, not legal advice, needs counsel.** **খসড়া: এটি আইনি পরামর্শ নয়; ব্যবহারের আগে আইনজীবীর পর্যালোচনা প্রয়োজন।**
 
-For counsel: this follows `docs/pilot-plan.md` section 3 and what the code does on 2026-10-14. Check it against the Personal Data Protection Ordinance 2025 (questions 2, 4, 6 and 9 there). An English working translation is below; drivers sign the Bangla text. Items marked TODO need the owner or the operator.
+For counsel: this follows `docs/pilot-plan.md` section 3 and what the code does on 2026-10-15 (section 2 is exact: it matches `docs/android-wrapper.md`, "Shift mode"). Check it against the Personal Data Protection Ordinance 2025 (questions 2, 4, 6 and 9 there). An English working translation is below; drivers sign the Bangla text. Items marked TODO need the owner or the operator.
 
 ---
 
@@ -11,12 +11,15 @@ For counsel: this follows `docs/pilot-plan.md` section 3 and what the code does 
 **১. কী তথ্য রাখা হয়**
 - আপনার নাম, এবং আপনি দিলে আপনার মোবাইল নম্বর।
 - আপনার গাড়ির নিবন্ধন নম্বর।
-- মিশন (রোগী আনার কাজ) চলার সময় আপনার ফোনের জিপিএস অবস্থান, যতক্ষণ অ্যাপ খোলা থাকে।
+- আপনার ফোনের জিপিএস অবস্থান: মিশন (রোগী আনার কাজ) চলার সময়, এবং অ্যান্ড্রয়েড অ্যাপে আপনি ডিউটিতে (On shift) থাকলে মিশনের মাঝেও। কখন, তা ২ নম্বরে লেখা আছে।
 - মিশনের প্রতিটি ধাপ (রওনা, ঘটনাস্থলে পৌঁছানো, রোগী নিয়ে যাওয়া, হাসপাতালে পৌঁছানো, শেষ) কে এবং কখন বদলেছে।
 - রোগীর নাম, অসুস্থতা বা ফোন নম্বর এই অ্যাপে রাখার কথা নয়।
 
 **২. কখন অবস্থান নেওয়া হয়**
-- শুধু যখন আপনাকে কোনো মিশন দেওয়া আছে এবং অ্যাপ খোলা আছে। মিশন না থাকলে অবস্থান পাঠানো হয় না, এবং সার্ভার তা গ্রহণও করে না।
+- মিশন চলার সময়: মিশন পাওয়া থেকে মিশন শেষ বা বাতিল হওয়া পর্যন্ত, প্রায় প্রতি ৫ থেকে ১০ সেকেন্ডে। অ্যান্ড্রয়েড অ্যাপে স্ক্রিন বন্ধ থাকলে বা অন্য অ্যাপ (যেমন ম্যাপ) খোলা থাকলেও এটি চলে; তখন ফোনের নোটিফিকেশনে "Tracking vehicle" দেখা যায়।
+- ডিউটিতে থাকলে (শুধু অ্যান্ড্রয়েড অ্যাপে): আপনি "ডিউটি শুরু" চাপা থেকে "ডিউটি শেষ" চাপা বা বের হওয়া পর্যন্ত, মিশন না থাকলেও, প্রতি মিনিটে একবার; সার্ভার ৩০ সেকেন্ডে সর্বোচ্চ একটি রাখে। এই সময় অ্যাপ নতুন মিশনের খোঁজও নেয়, যাতে ফোন পকেটে থাকলেও অ্যালার্ম বাজে। ডিউটি আপনি নিজে চালু করেন; প্রতিবার প্রবেশের পর এটি বন্ধ থাকে।
+- কখনো নয়: আপনি বের হয়ে (Sign out) গেলে; ডিউটির বাইরে, মিশন না থাকলে; কোনো গাড়ির সাথে যুক্ত না থাকলে; গাড়ি সেবার বাইরে থাকলে। তখন সার্ভার অবস্থান গ্রহণও করে না।
+- ব্রাউজারে (অ্যান্ড্রয়েড অ্যাপ ছাড়া): শুধু মিশন চলার সময় এবং অ্যাপ স্ক্রিনে খোলা থাকলে।
 
 **৩. কেন নেওয়া হয়**
 - কাছের গাড়ি পাঠাতে এবং মিশন সমন্বয় করতে।
@@ -58,10 +61,14 @@ During this pilot **[operator name: OWNER TODO]** is testing a dispatch software
 1. **What is stored.**
    - Your name and, if you give it, your mobile number.
    - Your vehicle's registration.
-   - Your phone's GPS position during a mission while the app is open.
+   - Your phone's GPS position: during a mission and, in the Android app, between missions while you are on shift. Point 2 says exactly when.
    - Who changed each mission step, and when.
    - Patient names, conditions and phone numbers are not meant to be stored in the app.
-2. **When your position is taken.** Only while you have a mission and the app is open. Without a mission, no position is sent, and the server refuses it.
+2. **When your position is taken.**
+   - During a mission: from when you get the mission until it is completed or cancelled, about every 5 to 10 seconds. In the Android app this goes on with the screen off or another app (such as Maps) open; a notification "Tracking vehicle" shows while it runs.
+   - On shift (Android app only): from when you tap "Start shift" until you tap "End shift" or sign out, also between missions, once a minute; the server keeps at most one every 30 seconds. While on shift the app also checks for new missions, so the alarm rings with the phone in your pocket. You start the shift yourself; after each sign-in it is off.
+   - Never: when you are signed out; off shift with no mission; when you are not paired with a vehicle; when the vehicle is out of service. The server refuses positions then.
+   - In a web browser (without the Android app): only during a mission and while the app is open on screen.
 3. **Why.**
    - To send the nearest vehicle and coordinate missions.
    - To measure how long it takes from the call to the scene.
@@ -85,3 +92,4 @@ Counsel to confirm:
 - Is written or thumbprint consent required, or is logged consent enough?
 - Must the notice name the hosting location and the SMS provider's country?
 - Is a 90-day ping retention allowed?
+- Is tracking between missions on shift (once a minute, started by the driver) covered by this consent, and may the operator require drivers to be on shift during working hours?
