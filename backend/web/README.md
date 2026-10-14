@@ -92,8 +92,14 @@ shell, never API calls. Bump its cache name `C` whenever you change a cached fil
 - **Server feedback:** if a ping's `clock_skew_s` is over 60, the app tells the driver to fix the phone clock (tracking
   still works). For 10 minutes after a mission ends, the app shows "Cancelled by dispatcher" or "Mission completed".
 - **Android wrapper:** when `window.AmbulanceNative` exists and a mission is active with a vehicle, the app calls
-  `startTracking(JSON.stringify({baseUrl: location.origin, token, vehicleId, missionId}))`. It calls it again when the
-  token or mission changes, and on page load when `isTracking()` is false (a running service is adopted as is).
+  `startTracking(JSON.stringify({baseUrl: location.origin, token, vehicleId, missionId, shift}))`. It calls it again
+  when the token, mission or shift changes, and on page load when `isTracking()` is false (a running service is adopted
+  as is). It calls it only while the page is visible (a service started from the background gets no location), and
+  again as soon as the page becomes visible.
+- **Shift (wrapper only):** a driver paired with an in-service vehicle (`/me` `paired_vehicle_id`) gets "Start shift" /
+  "End shift". On shift, between missions, the app starts native tracking of the paired vehicle with `missionId: ""`
+  and `shift: true`: the service reports it once a minute and rings for new missions (`docs/android-wrapper.md`).
+  Sign-out ends the shift. A plain browser has no shift: it cannot track or ring in the background.
   While the service runs, the web GPS watch stays off, so the server never gets two pings for one fix. If
   `startTracking` returns false (for example, it refused the `baseUrl`), the web path pings instead and the app retries
   native on the next poll. `stopTracking()` runs (if `isTracking()`) when the mission ends or is cancelled, and on
@@ -106,4 +112,4 @@ Limits:
 - Geolocation, wake lock and notifications need HTTPS or localhost.
 - In a plain browser tab, Android stops GPS when the screen is off or the app is in the background, for example after
   Navigate opens Maps. This is UNVERIFIED on a device; the wrapper is the fix.
-- An Android WebView has no Notification API, so inside the wrapper the native side must notify.
+- An Android WebView has no Notification API, so inside the wrapper the native side notifies, and only on shift.

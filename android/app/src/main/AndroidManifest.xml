@@ -8,7 +8,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- No ACCESS_BACKGROUND_LOCATION: the service is only started while the app is on screen. -->
+    <!-- No ACCESS_BACKGROUND_LOCATION: AmbulanceNative.startTracking refuses unless the app is on screen, and a system
+         restart in the background stops at once and asks the driver to open the app. -->
 
     <application
         android:allowBackup="false"

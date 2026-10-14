@@ -6,8 +6,14 @@
     <string name="channel_tracking">গাড়ির অবস্থান · Vehicle tracking</string>
     <string name="tracking_title">Tracking vehicle %1$s</string>
     <string name="tracking_text">ডিসপ্যাচারকে লোকেশন পাঠানো হচ্ছে · Sending location to the dispatcher</string>
-    <string name="why_location">মিশন চলার সময় ডিসপ্যাচার অ্যাম্বুলেন্সের অবস্থান দেখেন। পরের স্ক্রিনে সঠিক (Precise) লোকেশন এবং \"অ্যাপ ব্যবহারের সময়\" অনুমতি দিন।\n\nThe dispatcher sees the ambulance\'s position during a mission. On the next screen, allow precise location \"while using the app\".</string>
-    <string name="why_notifications">ট্র্যাকিং চলার সময় একটি নোটিফিকেশন দেখাবে, যাতে ফোন অ্যাপটি বন্ধ না করে।\n\nA notification shows while tracking runs, so the phone does not stop the app.</string>
+    <string name="shift_text">ডিউটিতে: মিশন ছাড়া প্রতি মিনিটে লোকেশন, নতুন মিশনের সতর্কতা চালু · On shift: location every minute between missions, new-mission alerts on</string>
+    <string name="channel_missions">নতুন মিশন · New missions</string>
+    <string name="mission_title">নতুন মিশন · New mission</string>
+    <string name="mission_text">অ্যাপটি খুলে গ্রহণ করুন · Open the app and accept</string>
+    <string name="restart_title">ট্র্যাকিং বন্ধ · Tracking stopped</string>
+    <string name="restart_text">ফোন অ্যাপটি বন্ধ করেছে। আবার চালু করতে অ্যাপটি খুলুন · The phone closed the app. Open it to resume tracking and mission alerts</string>
+    <string name="why_location">মিশন চলার সময়, এবং আপনি ডিউটিতে (On shift) থাকলে মিশনের মাঝেও, ডিসপ্যাচার অ্যাম্বুলেন্সের অবস্থান দেখেন। পরের স্ক্রিনে সঠিক (Precise) লোকেশন এবং \"অ্যাপ ব্যবহারের সময়\" অনুমতি দিন।\n\nThe dispatcher sees the ambulance\'s position during a mission and, while you are on shift, between missions. On the next screen, allow precise location \"while using the app\".</string>
+    <string name="why_notifications">নতুন মিশন এলে ফোন পকেটে থাকলেও অ্যালার্ম বাজবে। ট্র্যাকিং চলার সময় একটি নোটিফিকেশনও দেখাবে, যাতে ফোন অ্যাপটি বন্ধ না করে।\n\nA new mission rings an alarm even with the phone in your pocket. A notification also shows while tracking runs, so the phone does not stop the app.</string>
     <string name="why_battery">স্ক্রিন বন্ধ থাকলেও লোকেশন পাঠাতে অ্যাপটিকে ব্যাটারি অপটিমাইজেশনের বাইরে রাখুন। পরের স্ক্রিনে \"Allow\" চাপুন।\n\nTo keep sending location with the screen off, let the app ignore battery optimisation. Tap \"Allow\" on the next screen.</string>
     <string name="oem_guide">এই ফোন ব্যাকগ্রাউন্ডের অ্যাপ বন্ধ করে দিতে পারে। অ্যাপ সেটিংসে Autostart চালু করুন, Battery-তে \"No restrictions\" বা \"Allow background activity\" দিন, আর Recent apps-এ অ্যাপটি লক করুন।\n\nThis phone may stop background apps. In the app\'s settings, turn on Autostart, set Battery to \"No restrictions\" or \"Allow background activity\", and lock the app in Recent apps.</string>
     <string name="continue_">ঠিক আছে · Continue</string>

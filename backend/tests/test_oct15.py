@@ -1,7 +1,9 @@
-"""Critique 2026-10-15: free vehicles on the map (N2: on-shift pings between missions)."""
+"""Critique 2026-10-15: free vehicles on the map (N2: on-shift pings between missions) and the wrapper's shift mode."""
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from app.main import IDLE_PING_S
+from app.main import IDLE_PING_S, TERMINAL
 from tests.test_api import DHAKA, env, iso, mk  # noqa: F401
 
 
@@ -54,3 +56,9 @@ def test_n2_mission_pings_are_never_thinned(env):
     mk(env)
     assert [ping(env, on_shift=True).json()["stored"] for _ in range(3)] == [True] * 3
     assert pings(env) == 3
+
+
+def test_wrapper_knows_the_terminal_states():
+    """The Android shift poll tells an ended mission from a live one by status name; it must follow the state machine."""
+    kt = Path(__file__).resolve().parents[2] / "android/app/src/main/kotlin/bd/ambulanceaid/driver/ShiftWatch.kt"
+    assert set(re.findall(r'"([A-Z_]+)"', re.search(r"ENDED = setOf\(([^)]*)\)", kt.read_text())[1])) == set(TERMINAL)

@@ -16,7 +16,10 @@ const T = {
     skew: 'ফোনের ঘড়ি ১ মিনিটের বেশি ভুল। সেটিংসে স্বয়ংক্রিয় তারিখ ও সময় চালু করুন। ট্র্যাকিং চলছে।',
     noVeh: 'এই মিশনে কোনো অ্যাম্বুলেন্স যুক্ত নেই, তাই লোকেশন পাঠানো হচ্ছে না। ডিসপ্যাচারকে ফোন করুন।',
     gpsDenied: 'জিপিএস অনুমতি নেই। ব্রাউজার সেটিংসে অনুমতি দিন।', gpsOff: 'জিপিএস পাওয়া যাচ্ছে না।', gpsNo: 'এই ডিভাইসে জিপিএস নেই।',
-    queued: 'সংরক্ষিত লোকেশন (সর্বোচ্চ ৫ মিনিট রাখা হয়)', expSoon: 'আপনার প্রবেশের মেয়াদ ৭ দিনের মধ্যে শেষ হবে। ডিসপ্যাচারের কাছ থেকে নতুন কোড নিন।'},
+    queued: 'সংরক্ষিত লোকেশন (সর্বোচ্চ ৫ মিনিট রাখা হয়)', expSoon: 'আপনার প্রবেশের মেয়াদ ৭ দিনের মধ্যে শেষ হবে। ডিসপ্যাচারের কাছ থেকে নতুন কোড নিন।',
+    shiftOn: 'ডিউটি শুরু (মিশনের অ্যালার্ম, প্রতি মিনিটে লোকেশন)', shiftOff: 'ডিউটি শেষ',
+    onShift: 'ডিউটিতে আছেন: ফোন পকেটে থাকলেও নতুন মিশনে অ্যালার্ম বাজবে। মিশন ছাড়া প্রতি মিনিটে লোকেশন যায়।',
+    shiftFail: 'ডিউটি চালু হয়নি: অ্যাপকে লোকেশনের অনুমতি দিন।'},
   en: {title: 'Driver', lang: 'বাংলা', code: '6-digit code from the dispatcher', pasteTok: 'Use a token instead', token: 'Access token',
     login: 'Sign in', logout: 'Sign out', logoutQ: 'Sign out? You will need a new code from the dispatcher to sign in again.', refresh: 'Refresh',
     none: 'No mission', mission: 'Current mission', status: 'Status', pickup: 'Pickup', navigate: 'Navigate', next: 'Next step', noNext: 'No further steps',
@@ -31,7 +34,10 @@ const T = {
     skew: 'Phone clock is off by more than 1 minute. Turn on automatic date and time in Settings. Tracking still works.',
     noVeh: 'No ambulance is linked to this mission, so your location is not being sent. Call the dispatcher.',
     gpsDenied: 'GPS permission denied. Allow location in browser settings.', gpsOff: 'GPS unavailable.', gpsNo: 'No GPS on this device.',
-    queued: 'Saved locations (kept up to 5 minutes)', expSoon: 'Your sign-in expires within 7 days. Ask the dispatcher for a new code.'},
+    queued: 'Saved locations (kept up to 5 minutes)', expSoon: 'Your sign-in expires within 7 days. Ask the dispatcher for a new code.',
+    shiftOn: 'Start shift (mission alarm, location every minute)', shiftOff: 'End shift',
+    onShift: 'On shift: a new mission rings even with the phone in your pocket. Between missions your location is sent once a minute.',
+    shiftFail: 'Shift not running: allow location for the app.'},
 };
 const SL = {
   bn: {DISPATCHED: 'প্রেরিত', EN_ROUTE_PICKUP: 'পিকআপের পথে', AT_SCENE: 'ঘটনাস্থলে', TRANSPORTING_PATIENT: 'রোগী নিয়ে যাচ্ছি', AT_HOSPITAL: 'হাসপাতালে পৌঁছেছি', COMPLETED: 'সম্পন্ন', CANCELLED: 'বাতিল'},
@@ -40,11 +46,11 @@ const SL = {
 const DONE = ['COMPLETED', 'CANCELLED'];
 const QK = 'driver_ping_queue', QMAX = 200, PING_MS = 5000, STALE_MS = 300000, TIMEOUT_MS = 10000, TITLE = document.title;
 let lang = 'bn', token = '', me = null, mission = null, trans = {}, msgs = {}, watchId = null, lastPing = 0, replaying = false;
-let audio = null, alertTimer = null, alertN = 0, notified = '', wake = null, nativeKey = null;
+let audio = null, alertTimer = null, alertN = 0, notified = '', wake = null, nativeKey = null, shift = false;
 const t = k => T[lang][k] || k;
 const sl = s => Object.hasOwn(SL[lang], s) ? SL[lang][s] : esc(s); // unknown state: escaped raw string
 const sleep = ms => new Promise(f => setTimeout(f, ms));
-try { token = localStorage.getItem('tok') || ''; lang = localStorage.getItem('lang') || 'bn'; } catch (e) {}
+try { token = localStorage.getItem('tok') || ''; lang = localStorage.getItem('lang') || 'bn'; shift = localStorage.getItem('shift') === '1'; } catch (e) {}
 function setToken(v) { token = v; try { if (v) localStorage.setItem('tok', v); else localStorage.removeItem('tok'); } catch (e) {} } // localStorage: survives closing the installed app
 
 function say(key, text, err) { // one message slot per key, rendered in the aria-live region
@@ -68,7 +74,7 @@ async function api(method, path, body) {
   return r;
 }
 function signOut(expired) { // expired (401): keep the queue, its entries carry their own mission and vehicle
-  if (!expired) try { localStorage.removeItem(QK); } catch (e) {}
+  if (!expired) { shift = false; try { localStorage.removeItem(QK); localStorage.removeItem('shift'); } catch (e) {} } // a new sign-in starts off shift
   setToken(''); me = null; mission = null; msgs = {}; msgKeys = {};
   track(); render(); if (expired) sayT('auth', 'e401', true);
 }
@@ -138,24 +144,33 @@ function stopGps() { if (watchId !== null) navigator.geolocation.clearWatch(watc
 const active = () => !!mission && !DONE.includes(mission.status);
 
 // ---- what a live mission needs: tracking (web or native), screen on, alert until accepted
+// On shift (Android wrapper only): between missions its service reports the paired vehicle and rings for new missions.
+const onShift = () => shift && !!window.AmbulanceNative && !!me?.paired_vehicle_id;
 function track() {
-  const live = !!token && active(), on = live && !!me.vehicle_id;
+  const live = !!token && active(), on = live && !!me.vehicle_id, idle = !!token && !live && onShift();
   sayT('veh', live && !on ? 'noVeh' : '', true); // B7: never ping /vehicles/null
   keepAwake(live); alerting(live && !mission.acknowledged_at);
-  if (nativeTrack(on)) stopGps(); // the wrapper's service pings, so the web watch stays off and the server never gets both
+  const nat = nativeTrack(on || idle, live);
+  sayT('shift', onShift() ? (nat ? 'onShift' : 'shiftFail') : '', !nat);
+  if (nat) stopGps(); // the wrapper's service pings, so the web watch stays off and the server never gets both
   else if (on) { startGps(); replay(); } else stopGps();
 }
-function nativeTrack(on) { // Android wrapper; isTracking() is the truth, since its service can stop itself
+function nativeTrack(on, live) { // Android wrapper; isTracking() is the truth, since its service can stop itself
   const N = window.AmbulanceNative;
   if (!N) return false;
   try {
     if (!on) { if (N.isTracking()) N.stopTracking(); nativeKey = ''; return false; }
-    const k = JSON.stringify({baseUrl: location.origin, token, vehicleId: me.vehicle_id, missionId: mission.mission_id});
+    const k = JSON.stringify({baseUrl: location.origin, token, vehicleId: live ? me.vehicle_id : me.paired_vehicle_id,
+      missionId: live ? mission.mission_id : '', shift: onShift()});
     if (N.isTracking() && (nativeKey === null || nativeKey === k)) { nativeKey = k; return true; } // first load: adopt it
+    // N3: a service started from the background gets no location, and neither would a hidden page's web watch. Wait:
+    // visibilitychange calls track() again when the driver is back.
+    if (document.visibilityState !== 'visible') return true;
     nativeKey = N.startTracking(k) === true ? k : ''; // false (e.g. baseUrl refused): the web path takes over
     return !!nativeKey;
   } catch (e) { return false; }
 }
+function setShift(v) { shift = v; try { localStorage.setItem('shift', v ? '1' : ''); } catch (e) {} track(); render(); }
 function keepAwake(on) { // the browser drops the lock whenever the page is hidden, so visibilitychange asks again
   if (on && !wake && navigator.wakeLock && document.visibilityState === 'visible') {
     const p = wake = navigator.wakeLock.request('screen').then(s => { s.onrelease = () => { if (wake === p) wake = null; }; return s; },
@@ -259,6 +274,7 @@ function render() {
   }
   const q = qGet().filter(qOk).length;
   let h = alertsOff() ? `<button class="big sec" id="al">${esc(t('alertsOn'))}</button>` : '';
+  if (window.AmbulanceNative && me?.paired_vehicle_id) h += `<button class="big${shift ? ' sec' : ''}" id="shift">${esc(t(shift ? 'shiftOff' : 'shiftOn'))}</button>`;
   if (!mission) h += `<div class="card">${esc(t('none'))}</div>`;
   else {
     const id = `#<span title="${esc(mission.mission_id)}">${esc(mission.mission_id.slice(0, 8))}</span>`;
@@ -277,6 +293,7 @@ function render() {
   a.querySelectorAll('[data-s]').forEach(b => b.onclick = () => setStatus(b.dataset.s));
   if ($('al')) $('al').onclick = enableAlerts;
   if ($('ack')) $('ack').onclick = accept;
+  if ($('shift')) $('shift').onclick = () => setShift(!shift);
   $('rf').onclick = () => { sayT('act', ''); load(); };
   $('lo').onclick = async () => { if (await confirmDlg(esc(t('logoutQ')))) signOut(false); };
 }
@@ -287,7 +304,7 @@ addEventListener('offline', () => sayT('net', 'offline', true));
 addEventListener('hashchange', fromHash);
 addEventListener('ambulance-native-stopped', () => load()); // 401: /me answers 401 and routes to re-pairing; 403/404: shows the ended mission
 addEventListener('pointerdown', armAudio);
-document.addEventListener('visibilitychange', () => keepAwake(!!token && active()));
+document.addEventListener('visibilitychange', () => { if (me) track(); }); // screen wake lock, and native start on return (N3)
 setInterval(() => { if (token && navigator.onLine) load(); }, 15000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 render(); if (!navigator.onLine) sayT('net', 'offline', true); if (!fromHash()) load();
