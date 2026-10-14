@@ -29,10 +29,11 @@ def test_terminal_accepts_none(src):
     assert not any(can_transition(src, d) for d in State)
 
 
-def test_driver_mock_matches_state_machine():
-    import importlib.util
+def test_driver_app_labels_every_state():
+    # The driver app has a Bangla and an English label per state; a new state must get both.
+    import re
     from pathlib import Path
-    from app.state_machine import TRANSITIONS, required_role
-    sp = importlib.util.spec_from_file_location("mock_server", Path(__file__).resolve().parent.parent / "web/driver/mock_server.py")
-    m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
-    assert m.FLOW == {s.value: sorted(n.value for n in x if required_role(n) == "driver") for s, x in TRANSITIONS.items()}
+    js = (Path(__file__).resolve().parent.parent / "web/driver/app.js").read_text(encoding="utf-8")
+    bn, en = re.search(r"const SL = \{\n  bn: \{(.*?)\},\n  en: \{(.*?)\},", js, re.S).groups()
+    for labels in (bn, en):
+        assert set(re.findall(r"([A-Z_]+):", labels)) == {s.value for s in State}
