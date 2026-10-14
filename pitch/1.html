@@ -56,7 +56,7 @@ ul.pts.red li:before{background:var(--red)}
 <body>
 <script>
 /* ===== FILL IN BEFORE SENDING: one place for the contact line ===== */
-const CONTACT = "YOUR NAME · PHONE · EMAIL";
+const CONTACT = "OWNER TODO: name · phone · email";
 /* ================================================================== */
 </script>
 
@@ -69,20 +69,15 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
 <section class="slide dark">
  <div class="eyebrow">A pilot proposal for Bangladesh</div>
  <h1 style="margin-top:50px;max-width:900px">Ambulance-AID-BD</h1>
- <p class="lead" style="font-size:32px;max-width:860px">Faster dispatch and live visibility for ambulances, and next, fire trucks.</p>
+ <p class="lead" style="font-size:32px;max-width:860px">Faster dispatch and vehicle visibility for ambulance fleets.</p>
  <p class="lead bn" style="font-size:34px;font-weight:700;margin-top:34px">প্রতিটি মিনিট মূল্যবান</p>
  <p class="lead" style="font-size:19px;margin-top:80px;color:#cfe3db">Working prototype. No operator yet. That is the reason for this note.</p>
- <svg class="art" width="360" height="150" viewBox="0 0 360 150" role="img" aria-label="Ambulance and fire truck illustration">
+ <svg class="art" width="180" height="150" viewBox="0 0 180 150" role="img" aria-label="Ambulance illustration">
   <g>
    <rect x="10" y="40" width="110" height="60" rx="6" fill="#fff"/><path d="M120 55h34l18 22v23h-52z" fill="#fff"/><path d="M130 62h20l12 15h-32z" fill="#9fc6b8"/>
    <rect x="52" y="52" width="26" height="8" fill="#c8102e"/><rect x="61" y="43" width="8" height="26" fill="#c8102e"/>
    <rect x="78" y="30" width="22" height="8" rx="3" fill="#c8102e"/>
    <circle cx="45" cy="104" r="12" fill="#14201c"/><circle cx="145" cy="104" r="12" fill="#14201c"/><circle cx="45" cy="104" r="5" fill="#ccc"/><circle cx="145" cy="104" r="5" fill="#ccc"/>
-  </g>
-  <g transform="translate(190 0)">
-   <rect x="0" y="48" width="100" height="52" rx="5" fill="#c8102e"/><path d="M100 60h42l16 20v20h-58z" fill="#c8102e"/><path d="M110 66h24l12 14h-36z" fill="#ffd9de"/>
-   <rect x="8" y="34" width="84" height="8" rx="3" fill="#e9e9e9"/><rect x="14" y="56" width="70" height="6" fill="#fff" opacity=".7"/>
-   <circle cx="30" cy="104" r="12" fill="#14201c"/><circle cx="130" cy="104" r="12" fill="#14201c"/><circle cx="30" cy="104" r="5" fill="#ccc"/><circle cx="130" cy="104" r="5" fill="#ccc"/>
   </g>
  </svg>
 </section>
@@ -115,7 +110,7 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
  <h2>The pieces are finally in place.</h2>
  <div class="grid g2">
   <div class="card"><b>A national call system exists</b>999 already brings emergencies in. What is thin is the dispatch-to-scene step, and the data on it.</div>
-  <div class="card"><b>Phones are already in drivers' hands</b>A low-end Android phone and a browser are enough. No special hardware.</div>
+  <div class="card"><b>Phones are already in drivers' hands</b>A low-end Android phone and a browser should be enough (UNVERIFIED: not yet run on a real phone).</div>
   <div class="card"><b>Bangla first</b>The driver app works in Bangla and English, so the person on the road is not left out.</div>
   <div class="card"><b>Dhaka will not get less crowded</b>Every minute of delay needs to be seen to be reduced.</div>
  </div>
@@ -124,11 +119,11 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
 <!-- 5 -->
 <section class="slide"><div class="stripe"></div>
  <div class="eyebrow">What exists today <span class="tag">built</span></div>
- <h2>A working dispatch and live-visibility system.</h2>
+ <h2>A working dispatch prototype.</h2>
  <div class="grid g3">
-  <div class="card"><b>Dispatcher console</b>Create, assign and cancel missions. See live vehicle positions and mission history.</div>
-  <div class="card"><b>Driver app (PWA)</b>Bangla and English. Runs on low-end phones. Offline queue: GPS pings wait and send when signal returns.</div>
-  <div class="card"><b>Full audit trail</b>Every status change records who, from which state, to which, and when.</div>
+  <div class="card"><b>Dispatcher console</b>Create, assign and cancel missions; mission history. Each vehicle's last position as coordinates with its age, refreshed every 5 s, sent only during a mission while the driver app is open. No map yet.</div>
+  <div class="card"><b>Driver app (PWA)</b>Bangla and English. Low-end phones: UNVERIFIED, never run on a real phone. Offline queue: GPS pings up to 5 minutes old are sent when signal returns; older ones are dropped.</div>
+  <div class="card"><b>Status-change audit trail</b>Every status change records who, from which state, to which, and when, including a dispatcher's change on a driver's behalf, with its reason.</div>
   <div class="card"><b>Role-based access</b>Dispatchers manage. A driver can only touch the mission assigned to them.</div>
   <div class="card"><b>Token control</b>Per-user hashed tokens. Rotate, revoke, and automatic 90-day expiry.</div>
   <div class="card"><b>Runs on PostgreSQL</b>Automatic schema migrations and API contract tests. Not yet deployed.</div>
@@ -148,31 +143,19 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
 
 <!-- 7 -->
 <section class="slide"><div class="stripe"></div>
- <div class="eyebrow">Next vehicle type <span class="tag plan">planned, not built</span></div>
- <h2>Fire trucks run on the same engine.</h2>
- <div class="grid g2">
-  <div class="card"><b>Same clock</b>Dispatch-to-scene time matters for a fire as much as for a patient.</div>
-  <div class="card"><b>Multi-vehicle incidents</b>One incident, several trucks and ambulances, tracked together.</div>
-  <div class="card"><b>Coordination</b>Stations, hydrants and hospitals in one view.</div>
-  <div class="card"><b>No rebuild</b>Missions, positions, roles and audit trail already exist; fire is the roadmap's second vehicle type.</div>
- </div>
-</section>
-
-<!-- 8 -->
-<section class="slide"><div class="stripe"></div>
  <div class="eyebrow">What it can do for Bangladesh</div>
  <h2>Goals the pilot will measure, not promises.</h2>
  <div class="grid g3">
   <div class="card"><b>Response time</b>Goal: shorten dispatch to acknowledge. Today there is no baseline; the pilot produces one.</div>
-  <div class="card"><b>Accountability</b>A complete, timestamped trail for every mission. This already works.</div>
+  <div class="card"><b>Accountability</b>A timestamped status-change trail for every mission. This already works in tests.</div>
   <div class="card"><b>Data for planning</b>Where fleets wait, which routes are slow, how many missions are late.</div>
   <div class="card"><b>Local software, local jobs</b>Built in Bangladesh, open source (Apache 2.0), no licence fee to a foreign vendor.</div>
-  <div class="card"><b>Low cost</b>Runs on phones operators already own. Pricing is not set; goal is to stay far below imported systems.</div>
-  <div class="card"><b>A base for more</b>Fire trucks, and one day links to 999, each only with written agreement.</div>
+  <div class="card"><b>Low cost</b>Meant to run on phones operators already own (UNVERIFIED). Pricing is not set; goal is to stay far below imported systems.</div>
+  <div class="card"><b>A base for more</b>One day, links to 999, only with a written agreement.</div>
  </div>
 </section>
 
-<!-- 9 -->
+<!-- 8 -->
 <section class="slide"><div class="stripe"></div>
  <div class="eyebrow">Safety and privacy</div>
  <h2>Advisory only. Phone and radio always come first.</h2>
@@ -184,7 +167,7 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
  </ul>
 </section>
 
-<!-- 10 -->
+<!-- 9 -->
 <section class="slide"><div class="stripe"></div>
  <div class="eyebrow">The pilot</div>
  <h2>One fleet. Under 20 vehicles. Dispatch and visibility only.</h2>
@@ -195,30 +178,30 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
  <p class="lead" style="font-size:20px">Failure is a valid result and will be published.</p>
 </section>
 
-<!-- 11 -->
+<!-- 10 -->
 <section class="slide"><div class="stripe"></div>
  <div class="eyebrow">Honest status</div>
  <h2>A working prototype with no operator. That is the ask.</h2>
  <div class="grid g2">
-  <div class="card"><b>True today</b>Tested in simulation and in headless browsers. Backend tests pass on PostgreSQL. Code is open source.</div>
+  <div class="card"><b>True today</b>Headless-browser tests with a fake GPS fix. Backend tests pass on PostgreSQL in GitHub CI. Code is open source.</div>
   <div class="card"><b>Not yet true</b>No real vehicles, phones in motion, users, partner, legal opinion, or deployment. No measured results.</div>
  </div>
  <p class="lead" style="font-size:21px">Software alone cannot close this gap. One operator and one introduction can.</p>
 </section>
 
-<!-- 12 -->
+<!-- 11 -->
 <section class="slide dark">
  <div class="eyebrow">The ask</div>
  <h2>Three things that are easy to grant.</h2>
  <ul class="pts">
-  <li><b>One introduction</b> to a fleet operator or a fire station willing to host a small pilot.</li>
+  <li><b>One introduction</b> to an ambulance fleet operator willing to host a small pilot.</li>
   <li><b>One named point of contact</b> who can say yes or no and answer questions.</li>
   <li><b>Guidance</b> on data-protection compliance for location data of drivers and vehicles.</li>
  </ul>
  <p class="lead" style="font-size:20px">Nothing here needs a budget, a procurement, or a policy change.</p>
 </section>
 
-<!-- 13 -->
+<!-- 12 -->
 <section class="slide dark">
  <div class="eyebrow">Let us talk</div>
  <h1 style="font-size:56px">Fifteen minutes, one fleet, one pilot.</h1>
@@ -226,7 +209,7 @@ const CONTACT = "YOUR NAME · PHONE · EMAIL";
  <p class="lead bn" style="font-size:28px;margin-top:40px">প্রতিটি মিনিট মূল্যবান</p>
 </section>
 
-<!-- 14 -->
+<!-- 13 -->
 <section class="slide"><div class="stripe"></div>
  <div class="eyebrow">Sources</div>
  <h2 style="font-size:34px">Every number on these slides, and where to check it.</h2>
