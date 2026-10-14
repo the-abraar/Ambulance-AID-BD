@@ -15,16 +15,16 @@ Treat the system as down when the console will not load or shows no fresh vehicl
 
 ## Operator on call: restore
 
-1. Check the host and database are up (`GET /me` with any valid token returns 200).
-2. If the database is unreachable, restore the host first; the app needs no manual step once the database answers (it applies migrations at start).
-3. If a token leaked or a phone was lost: dispatcher revokes it (`POST /drivers/{id}/token/revoke`), and rotates it later for a new device (`POST /drivers/{id}/token/rotate`). The old token stops working immediately. Tokens also expire after 90 days: a driver who gets 401 with no revocation needs a rotated token; an expired dispatcher token needs a new one from `python -m app.bootstrap dispatcher NAME` on the host.
+1. Check `https://DOMAIN/healthz`: 200 `{"ok": true}` means app and database are up; 503 means the database is down or the app is unhealthy. On the host, `docker compose ps` shows which service is down.
+2. If the database is unreachable, bring the host and `db` back first (`docker compose up -d`). The app and Caddy recover on their own within about 10 s once `/healthz` answers. If data is lost or corrupted, restore the newest dump (`docs/deploy.md`, "Real restore").
+3. If a token leaked or a phone was lost: an admin revokes it (`POST /users/{id}/token/revoke`), and later pairs the new device (pairing code) or rotates the token. The old token stops working immediately. Tokens also expire 90 days after last use: a driver who gets 401 with no revocation needs a new pairing code. A stolen or expired admin token: on the host, `docker compose run --rm app python -m app.bootstrap revoke USER_ID`, then `... bootstrap admin NAME`.
 
 ## After recovery
 
-1. Enter every paper-log mission that is still open; close missions that finished while down. Audit times will show entry time, not event time; note the real times in the paper log and keep it.
+1. Enter every paper-log mission and move it through the steps it went through, as status changes on the driver's behalf with the reason "outage, paper log" and the real time from the paper log as the event time. The audit log records the dispatcher as actor, the driver, the reason and both times. Until the console has a button for this, use `PATCH /missions/{id}/status` with `reason` and `event_time`. Keep the paper log.
 2. Drivers keep the app open: queued pings (up to 5 minutes old) are sent on their own.
 3. Write down the outage start and end, cause, and how many missions ran on paper. Review it with the operator within a week.
 
 ## One driver
 
-Phone dead, no signal, or GPS denied: the driver calls the dispatcher; the dispatcher continues that mission by voice and logs it. Status changes are never queued offline, so a driver without signal cannot advance a mission until back online.
+Phone dead, no signal, or GPS denied: the driver calls the dispatcher; the dispatcher continues that mission by voice and logs it. Status changes are never queued offline, so a driver without signal cannot advance a mission; the dispatcher records the steps the driver reports by voice as changes on the driver's behalf, with a reason.

@@ -64,7 +64,7 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
 - Driver phone: `01XXXXXXXXX`, `8801...`, `+8801...`, Bangla digits, spaces and hyphens accepted; stored as
   `+8801XXXXXXXXX`; anything else is 422.
 - Validation errors (422) never echo the request body back.
-- Schema: Alembic (`migrations/`), applied at startup. Postgres/PostGIS swap: change TEXT ids/timestamps to
+- Schema: Alembic (`migrations/`), applied at startup in dev and tests. Under compose, the one-shot `migrate` service applies them as the owner role (`ops/migrate.py`); the app's `ambulance_app` role cannot change the schema. Postgres/PostGIS swap: change TEXT ids/timestamps to
   uuid/timestamptz, add geography(Point).
 
 ## SMS fallback

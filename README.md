@@ -2,17 +2,20 @@
 
 > Dispatch and fleet visibility for ambulance operators in Bangladesh. Longer-term concepts (signal preemption, 999 integration, a citizen marketplace) are design ideas only and are gated on external prerequisites listed below.
 
-## Honest status (as of 2026-10-12)
+## Honest status (as of 2026-10-14)
 
 **What exists**
-- A tested backend (`backend/`, Python/FastAPI): mission state machine, mission create/status/read APIs, vehicle GPS pings, per-user hashed bearer tokens, role checks (dispatcher vs assigned driver), a mission audit log, Alembic migrations, token rotate/revoke, a DB-backed ping rate limit. SQLite for dev, Postgres supported. Agent-written; test results are agent-reported (see `judge.md`).
+- A tested backend (`backend/`, Python/FastAPI): mission state machine, mission create/status/read APIs, vehicle GPS pings, per-user hashed bearer tokens, admin, dispatcher and driver roles, dispatcher status changes on a driver's behalf with a reason, 6-digit driver pairing codes, an optional SMS fallback, mission and auth audit logs, 90-day ping retention, `/healthz`, Alembic migrations. SQLite for dev, Postgres supported. Agent-written; test results are agent-reported (see `judge.md`).
+- A dispatcher console (`/console/`) and a Bangla/English driver web app (`/driver/`), tested only in headless browsers with a fake GPS fix. The console shows positions as coordinates; there is no map yet.
+- CI on GitHub runs the checks on SQLite and Postgres 16.
+- A docker compose stack (Caddy with security headers, Postgres with a least-privilege app role, nightly backups, a restore script), run end to end on a laptop only. See [docs/deploy.md](docs/deploy.md).
 - Design documents under `docs/` and an OpenAPI spec (`docs/api-spec/openapi.yaml`).
 
 **What does not exist**
 - No signal integration or signal-control code of any kind.
 - No partners, no pilot LOI, no government engagement, no legal opinion.
-- No field testing, no real vehicles, no real users. No driver app or dispatcher console UI.
-- Not deployed. CI has never run on GitHub. Postgres tested only on a local embedded server (not CI yet); PostGIS not used.
+- No field testing, no real vehicles, no real users. The driver app has never run on a real phone; a web page is expected to lose GPS when the screen is off or Maps is open.
+- Not hosted anywhere. No offsite backups, monitoring or alerting. PostGIS not used.
 - No measured baseline data. Impact figures in the architecture docs are unsourced estimates (see labels in those docs).
 
 ## Current phase: the wedge MVP
@@ -25,6 +28,8 @@ Mission states (single list, matches `backend/app/state_machine.py`):
 ## FUTURE (not started, not committed)
 
 These are concept designs. Each is gated; none begins until its gate is met.
+
+**Signals: not this project until the gates are met.** The traffic-light and AI-camera goal is parked; no code for it belongs in this repo before the EVP gate below is met.
 
 | Future product | Gate (must be true first) |
 | :--- | :--- |
@@ -39,8 +44,14 @@ If signals turn out to be manual, the fallback concept is police-assisted corrid
 ```text
 ├── README.md
 ├── judge.md                  # external readiness audit and progress log
-├── backend/                  # tested MVP backend (state machine, API, auth, audit, migrations)
+├── backend/                  # tested MVP backend, dispatcher console and driver web app (backend/web/)
+├── docker-compose.yml, Caddyfile, .env.example   # deploy stack (docs/deploy.md)
+├── ops/                      # migrate (least-privilege DB role), nightly backup, restore
+├── pitch/                    # pilot proposal deck
 ├── docs/
+│   ├── deploy.md             # deploy, backups, restore drill, verified run
+│   ├── runbook-downtime.md   # what to do when the system is down
+│   ├── pilot-agreement-draft.md, driver-consent-bn-draft.md   # DRAFTS for counsel, not legal advice
 │   ├── mvp-wedge.md          # current scope
 │   ├── pilot-plan.md         # concrete pilot, data protection, safety
 │   ├── risks.md              # top 10 risks
