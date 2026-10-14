@@ -105,3 +105,109 @@ def test_text_fields_capped_and_stripped(env):
     assert c.post("/vehicles", json={"operator": "o" * 201, "registration": "R"}, headers=D).status_code == 422
     r = c.post("/missions", json={"pickup_address": "  Mirpur  "}, headers=D)
     assert r.json()["pickup_address"] == "Mirpur"
+
+
+def test_s2_admin_split(env):
+    c, P, D = env["c"], env["P"], env["D"]
+    assert c.get("/me", headers=P).json()["admin"] is False and c.get("/me", headers=D).json()["admin"] is True
+    for method, path in (("post", "/drivers"), ("post", f"/drivers/{env['drv']}/token/rotate"),
+                         ("post", f"/drivers/{env['drv']}/token/revoke"), ("post", f"/drivers/{env['drv']}/pairing-code"),
+                         ("get", "/users"), ("post", "/users"), ("post", f"/users/{env['did']}/token/revoke")):
+        r = c.request(method.upper(), path, json={"name": "x"}, headers=P)
+        assert r.status_code == 403 and r.json()["detail"] == "admin only", path
+    # a plain dispatcher still dispatches
+    assert c.post("/missions", json={"pickup_address": "x"}, headers=P).status_code == 201
+    assert c.get("/drivers", headers=P).status_code == 200 and c.get("/vehicles", headers=P).status_code == 200
+    r = c.post("/users", json={"name": "night shift"}, headers=D)
+    assert r.status_code == 201 and r.json()["admin"] is False and r.json()["role"] == "dispatcher"
+    assert c.get("/me", headers=bearer(r.json()["token"])).json()["admin"] is False
+    assert {u["name"] for u in c.get("/users", headers=D).json()} >= {"disp", "plain", "drv1", "night shift"}
+
+
+def test_b6_admin_revokes_any_user(env):
+    c, D, P = env["c"], env["D"], env["P"]
+    assert c.post(f"/users/{env['pid']}/token/revoke", headers=D).status_code == 204
+    assert c.get("/me", headers=P).status_code == 401
+    assert c.post("/me/token/rotate", headers=P).status_code == 401  # the thief cannot rotate his way back
+    assert c.post("/users/nope/token/revoke", headers=D).status_code == 404
+    assert c.post(f"/users/{env['did']}/token/revoke", headers=env["V"]).status_code == 403
+    by = {u["user_id"]: u for u in c.get("/users", headers=D).json()}
+    assert by[env["pid"]]["revoked"] is True and by[env["did"]]["revoked"] is False
+
+
+def test_b6_cli_revoke(env):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    run = lambda *a: subprocess.run([sys.executable, "-m", "app.bootstrap", *a], cwd=Path(__file__).resolve().parents[1],
+                                    env={**os.environ, "AMBULANCE_DB_PATH": env["path"]}, capture_output=True, text=True)
+    assert run("revoke", env["did"]).returncode == 0
+    assert env["c"].get("/me", headers=env["D"]).status_code == 401  # even an admin
+    row = env["db"].execute("SELECT actor_id, action FROM auth_audit ORDER BY id DESC").fetchone()
+    assert (row["actor_id"], row["action"]) == ("cli", "revoke")
+    assert run("revoke", "nope").returncode != 0
+    out = run("admin", "rescue")
+    assert out.returncode == 0
+    tok = out.stdout.split("token=")[1].strip()
+    assert env["c"].get("/me", headers=bearer(tok)).json()["admin"] is True
+
+
+def test_b8_sliding_expiry(env):
+    c, db = env["c"], env["db"]
+    exp = lambda: db.execute("SELECT token_expires_at FROM users WHERE name='drv1'").fetchone()[0]
+    db.execute("UPDATE users SET token_expires_at=? WHERE name='drv1'", ("2099-01-01T00:00:00+00:00",)); db.commit()
+    c.get("/me", headers=env["V"])
+    assert exp() == "2099-01-01T00:00:00+00:00"  # far from due: no write
+    from app.db import token_expiry
+    db.execute("UPDATE users SET token_expires_at=? WHERE name='drv1'", (token_expiry(10),)); db.commit()
+    assert c.get("/me", headers=env["V"]).json()["token_expires_at"] > token_expiry(89)
+    assert exp() > token_expiry(89)
+    db.execute("UPDATE users SET token_expires_at=? WHERE name='drv1'", (token_expiry(89.5),)); db.commit()
+    before = exp()
+    c.get("/me", headers=env["V"])
+    assert exp() == before  # extended less than a day ago: no write
+
+
+def test_pairing_code_flow(env):
+    c, D, db = env["c"], env["D"], env["db"]
+    r = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D)
+    assert r.status_code == 200
+    code = r.json()["code"]
+    assert len(code) == 6 and code.isdigit() and r.json()["expires_at"] < iso(minutes=11)
+    assert code not in str([tuple(x) for x in db.execute("SELECT * FROM pairing_codes")])  # stored hashed
+    bn = code.translate(str.maketrans("0123456789", "০১২৩৪৫৬৭৮৯"))
+    p = c.post("/pair", json={"code": bn})  # typed on a Bangla keyboard
+    assert p.status_code == 200, p.text
+    assert p.json()["user"]["driver_id"] == env["drv"] and p.json()["user"]["role"] == "driver"
+    assert c.get("/me", headers=bearer(p.json()["token"])).json()["driver_id"] == env["drv"]
+    assert c.get("/me", headers=env["V"]).status_code == 401  # old token rotated away
+    assert c.post("/pair", json={"code": code}).status_code == 401  # single use
+    assert c.post("/pair", json={"code": "12345"}).status_code == 422
+    assert c.post("/drivers/nope/pairing-code", headers=D).status_code == 404
+    actions = [r["action"] for r in db.execute("SELECT action FROM auth_audit ORDER BY id")]
+    assert actions[-2:] == ["pairing_code", "pair"]
+
+
+def test_pairing_code_expires_and_revoke_kills_it(env):
+    c, D, db = env["c"], env["D"], env["db"]
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]
+    db.execute("UPDATE pairing_codes SET expires_at='2000-01-01T00:00:00+00:00'"); db.commit()
+    assert c.post("/pair", json={"code": code}).status_code == 401
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]
+    c.post(f"/drivers/{env['drv']}/token/revoke", headers=D)
+    assert c.post("/pair", json={"code": code}).status_code == 401
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]  # re-issuing re-enables on pairing
+    assert c.post("/pair", json={"code": code}).status_code == 200
+
+
+def test_pairing_code_dies_after_5_bad_tries_and_client_limit(env):
+    c, D = env["c"], env["D"]
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]
+    wrong = lambda i: f"{(int(code) + 1 + i) % 10 ** 6:06d}"
+    assert [c.post("/pair", json={"code": wrong(i)}).status_code for i in range(5)] == [401] * 5
+    assert c.post("/pair", json={"code": code}).status_code == 401  # the right code is dead now
+    codes = [c.post("/pair", json={"code": wrong(i)}).status_code for i in range(5, 10)]
+    assert codes == [401] * 4 + [429]  # the 11th try after 10 failures from one client: locked out for a while
+    fresh = c.post(f"/drivers/{env['drv2']}/pairing-code", headers=D).json()["code"]
+    assert c.post("/pair", json={"code": fresh}).status_code == 429  # even with a good code, until the window passes

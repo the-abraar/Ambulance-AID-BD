@@ -1,4 +1,5 @@
 import hashlib
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -105,8 +106,23 @@ def connect(target: str) -> Conn:
     return open_db(target, pooled=False)  # callers own this connection and may keep it open
 
 
-def token_expiry() -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=TOKEN_TTL_DAYS)).isoformat(timespec="microseconds")
+def db_target() -> str:
+    """AMBULANCE_DB_PATH; only dev (AMBULANCE_DEV=1) may fall back to dev.db, so a typo cannot start on a throwaway file."""
+    target = os.environ.get("AMBULANCE_DB_PATH")
+    if target:
+        return target
+    if os.environ.get("AMBULANCE_DEV") == "1":
+        return "dev.db"
+    raise RuntimeError("AMBULANCE_DB_PATH is required (SQLite path or postgresql:// URL); set AMBULANCE_DEV=1 for dev.db")
+
+
+def now(delta: timedelta = timedelta()) -> str:
+    """UTC ISO timestamp, the one format every writer uses (columns are TEXT, compared as strings)."""
+    return (datetime.now(timezone.utc) + delta).isoformat(timespec="microseconds")
+
+
+def token_expiry(days: float = TOKEN_TTL_DAYS) -> str:
+    return now(timedelta(days=days))
 
 
 def hash_token(tok: str) -> str:

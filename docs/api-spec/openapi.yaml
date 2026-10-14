@@ -1,107 +1,180 @@
 openapi: 3.1.0
 info:
-  title: Ambulance-AID-BD API
+  title: Ambulance-AID-BD dispatch API
   description: >
-    OpenAPI specification for the Ambulance Automated Infrastructure Dispatch & 
-    Traffic Preemption Platform for Bangladesh.
-  version: 1.0.0
+    The dispatch backend that exists in backend/: missions, vehicles, drivers, GPS pings, tokens.
+    One fleet per deployment. No signal preemption, telemetry gateway or public availability API; those are
+    future integrations described in docs/architecture/future-integrations.md, not endpoints.
+    Roles: driver; dispatcher (dispatches); admin = a dispatcher who may also create users and mint, rotate and
+    revoke tokens and pairing codes. Errors are {"detail": ...}; 422 bodies never echo the input.
+  version: 1.1.0
   contact:
     name: Ambulance-AID-BD Working Group
     url: https://github.com/the-abraar/Ambulance-AID-BD
 
-servers:
-  - url: https://api.ambulance-aid.gov.bd/v1
-    description: Production National Gateway
-  - url: https://staging.ambulance-aid.gov.bd/v1
-    description: Staging / Sandbox Environment
-  - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
-    description: INTERNAL ONLY. Private network/VPN link to the TMC. Not internet-facing. Serves the Internal-Preemption tag only.
-
 paths:
-  /telemetry/ingest:
+  /healthz:
+    get:
+      summary: Liveness and DB reachability (no auth; reveals only up or down)
+      operationId: healthz
+      responses:
+        '200': {description: DB reachable., content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}}
+        '503': {description: DB unreachable., content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}}
+
+  /pair:
     post:
-      summary: Ingest vehicle telematics ping
-      description: Streamed by IoT trackers or driver terminals every 1-5 seconds.
-      operationId: ingestTelemetry
-      security:
-        - MutualTLS: []
+      summary: Exchange a 6-digit pairing code for a driver token (no auth; the one-time code is the credential)
+      description: >
+        Rotates the driver's token (the old one stops working) and re-enables a revoked driver. Bangla digits are
+        accepted. Every wrong code counts against every live code, which dies after 5; one client gets 10 wrong
+        codes per 10 minutes.
+      operationId: pair
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TelemetryPing'
+        content: {application/json: {schema: {$ref: '#/components/schemas/PairRequest'}}}
       responses:
-        '202':
-          description: Telemetry accepted and queued for corridor engine processing.
-        '400':
-          description: Invalid payload or schema error.
-        '401':
-          description: Unauthorized vehicle certificate.
+        '200': {description: Paired; token shown once., content: {application/json: {schema: {$ref: '#/components/schemas/PairResult'}}}}
+        '401': {description: "Wrong, used, expired or exhausted code."}
+        '422': {description: Not 6 digits.}
+        '429': {description: Too many wrong codes from this client.}
 
   /missions:
     get:
-      summary: List missions, optionally by status (dispatcher only)
+      summary: List missions, newest first (dispatcher only)
+      description: active=true returns every non-terminal mission and ignores limit/offset; otherwise a paged history.
       operationId: listMissions
       security: [{BearerAuth: []}]
       parameters:
         - {name: status, in: query, required: false, schema: {$ref: '#/components/schemas/MissionStatus'}}
+        - {name: active, in: query, required: false, schema: {type: boolean, default: false}}
         - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 200}}
         - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
       responses:
         '200':
-          description: Missions, oldest first.
+          description: Missions, newest first.
           content:
             application/json:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Mission'}
     post:
-      summary: Create emergency dispatch mission
-      description: Initiated by 999 dispatchers or validated citizen emergency app bookings.
+      summary: Create (dispatch) a mission (dispatcher only)
+      description: >
+        A vehicle alone takes the vehicle's paired driver (send assigned_driver_id null for none). A driver alone takes
+        the driver's paired vehicle (422 if none). If the driver has a phone and SMS is configured, a text goes out
+        after the response; it never delays or fails the create. 30 creates per minute per token.
       operationId: createMission
-      security:
-        - BearerAuth: []
+      security: [{BearerAuth: []}]
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MissionCreateRequest'
+        content: {application/json: {schema: {$ref: '#/components/schemas/MissionCreateRequest'}}}
       responses:
-        '201':
-          description: Mission created and assigned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Mission'
+        '201': {description: Created in DISPATCHED., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '409': {description: The vehicle or driver already has an active mission.}
+        '422': {description: "Unknown or inactive vehicle, unknown/revoked/expired driver, driver without vehicle, invalid body."}
+        '429': {description: Create rate limit.}
 
-  /me:
-    get:
-      summary: Identity of the bearer token
-      operationId: getMe
-      security: [{BearerAuth: []}]
-      responses:
-        '200': {description: Caller., content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
   /missions/current:
     get:
-      summary: The calling driver's single non-terminal mission (driver only)
+      summary: The calling driver's active mission, else one that ended in the last 10 minutes (driver only)
+      description: A COMPLETED or CANCELLED status here tells the driver why the mission is gone.
       operationId: getCurrentMission
       security: [{BearerAuth: []}]
       responses:
         '200': {description: Mission., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
         '403': {description: Not a driver.}
-        '404': {description: No active mission.}
-  /meta/transitions:
+        '404': {description: No active or recently ended mission.}
+
+  /missions/{missionId}:
     get:
-      summary: Allowed next mission states per state, filtered to what the caller's role may perform (drivers advance, dispatchers cancel)
-      operationId: getTransitions
+      summary: One mission (dispatcher, or its assigned driver)
+      operationId: getMission
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Mission., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '403': {description: Another driver's mission.}
+        '404': {description: Unknown mission.}
+
+  /missions/{missionId}/status:
+    patch:
+      summary: Move a mission to its next status
+      description: >
+        The assigned driver makes the forward moves; a dispatcher cancels (DISPATCHED, EN_ROUTE_PICKUP, AT_SCENE only).
+        A dispatcher may also make any legal forward move for the driver (dead phone, back-fill after an outage): reason
+        is then required, event_time (when it really happened) is optional, and the audit row records the dispatcher as
+        user_id with on_behalf_of = the assigned driver. Drivers may not send reason or event_time. Unknown fields are 422.
+      operationId: updateMissionStatus
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MissionStatusUpdate'}}}
+      responses:
+        '200': {description: Updated., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '403': {description: "Wrong role, or not the assigned driver."}
+        '409': {description: "Illegal transition, or the status changed concurrently."}
+        '422': {description: "Missing reason on an on-behalf move, event_time outside creation..now, or invalid body."}
+
+  /missions/{missionId}/ack:
+    post:
+      summary: The assigned driver acknowledges the mission (sets acknowledged_at once; repeat calls change nothing)
+      operationId: ackMission
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Mission., content: {application/json: {schema: {$ref: '#/components/schemas/Mission'}}}}
+        '403': {description: Not the assigned driver.}
+        '404': {description: Unknown mission.}
+        '409': {description: Mission already ended.}
+
+  /missions/{missionId}/audit:
+    get:
+      summary: Status-change audit trail (dispatcher only)
+      operationId: getMissionAudit
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Entries, oldest first.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuditEntry'}}}}
+        '404': {description: Unknown mission.}
+
+  /me:
+    get:
+      summary: Identity of the bearer token
+      description: Every authenticated call slides the token's expiry to 90 days from now (written at most once a day).
+      operationId: getMe
       security: [{BearerAuth: []}]
       responses:
+        '200': {description: Caller., content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+
+  /me/token/rotate:
+    post:
+      summary: Replace the caller's own bearer token; the old one stops working at once
+      operationId: rotateOwnToken
+      security: [{BearerAuth: []}]
+      responses:
+        '200': {description: "New token, shown once.", content: {application/json: {schema: {$ref: '#/components/schemas/TokenRotated'}}}}
+
+  /meta/transitions:
+    get:
+      summary: Allowed next mission states per state, for the caller's role
+      description: on_behalf=true (dispatchers) lists the driver's moves a dispatcher may make for them, with a reason.
+      operationId: getTransitions
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: on_behalf, in: query, required: false, schema: {type: boolean, default: false}}
+      responses:
         '200': {description: Map., content: {application/json: {schema: {$ref: '#/components/schemas/Transitions'}}}}
+
   /vehicles:
     get:
-      summary: List vehicles with last ping (dispatcher only)
+      summary: List vehicles with paired driver, busy flag and last position (dispatcher only)
       operationId: listVehicles
       security: [{BearerAuth: []}]
       responses:
@@ -117,81 +190,15 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [operator, registration], properties: {operator: {type: string, minLength: 1}, registration: {type: string, minLength: 1}}}
+            schema: {type: object, required: [operator, registration], properties: {operator: {type: string, minLength: 1, maxLength: 200}, registration: {type: string, minLength: 1, maxLength: 200}}}
       responses:
         '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/VehicleSummary'}}}}
         '409': {description: Registration exists.}
-  /drivers:
-    get:
-      summary: List drivers (dispatcher only)
-      operationId: listDrivers
-      security: [{BearerAuth: []}]
-      responses:
-        '200':
-          description: Drivers.
-          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DriverSummary'}}}}
-    post:
-      summary: Register a driver; the bearer token is returned once (dispatcher only)
-      operationId: createDriver
-      security: [{BearerAuth: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [name], properties: {name: {type: string, minLength: 1}}}
-      responses:
-        '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/DriverCreated'}}}}
-  /me/token/rotate:
-    post:
-      summary: Replace the caller's own bearer token; the old one stops working at once
-      operationId: rotateOwnToken
-      security: [{BearerAuth: []}]
-      responses:
-        '200':
-          description: New token, shown once.
-          content: {application/json: {schema: {type: object, required: [token, expires_at], properties: {token: {type: string}, expires_at: {type: string, format: date-time}}}}}
-  /drivers/{driverId}/token/rotate:
-    post:
-      summary: Replace a driver's bearer token and re-enable a revoked driver (dispatcher only)
-      operationId: rotateDriverToken
-      security: [{BearerAuth: []}]
-      parameters:
-        - {name: driverId, in: path, required: true, schema: {type: string}}
-      responses:
-        '200':
-          description: New token, shown once.
-          content: {application/json: {schema: {type: object, required: [driver_id, token, expires_at], properties: {driver_id: {type: string}, token: {type: string}, expires_at: {type: string, format: date-time}}}}}
-        '403': {description: Not a dispatcher.}
-        '404': {description: Unknown driver.}
-  /drivers/{driverId}/token/revoke:
-    post:
-      summary: Revoke a driver's bearer token until it is rotated (dispatcher only)
-      operationId: revokeDriverToken
-      security: [{BearerAuth: []}]
-      parameters:
-        - {name: driverId, in: path, required: true, schema: {type: string}}
-      responses:
-        '204': {description: Revoked.}
-        '403': {description: Not a dispatcher.}
-        '404': {description: Unknown driver.}
-  /missions/{missionId}/audit:
-    get:
-      summary: Status-change audit trail (dispatcher only)
-      operationId: getMissionAudit
-      security: [{BearerAuth: []}]
-      parameters:
-        - {name: missionId, in: path, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: Entries, oldest first.
-          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuditEntry'}}}}
-        '404': {description: Unknown mission.}
 
-  /vehicles/{vehicleId}/pings:
-    post:
-      summary: Driver GPS ping (MVP; /telemetry/ingest is not implemented)
-      description: Only the driver assigned to an active mission using this vehicle. Timestamp must be within 300 s past / 60 s future. 429 if pinged faster than once per second.
-      operationId: postPing
+  /vehicles/{vehicleId}:
+    patch:
+      summary: Take a vehicle out of (or back into) service (dispatcher only); inactive vehicles cannot be dispatched
+      operationId: setVehicleActive
       security: [{BearerAuth: []}]
       parameters:
         - {name: vehicleId, in: path, required: true, schema: {type: string}}
@@ -199,17 +206,49 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [lat, lng, ts]
-              properties:
-                lat: {type: number, minimum: -90, maximum: 90}
-                lng: {type: number, minimum: -180, maximum: 180}
-                ts: {type: string, format: date-time}
+            schema: {type: object, required: [active], additionalProperties: false, properties: {active: {type: boolean}}}
       responses:
-        '201': {description: Stored.}
+        '200': {description: Vehicle., content: {application/json: {schema: {$ref: '#/components/schemas/VehicleSummary'}}}}
+        '404': {description: Unknown vehicle.}
+
+  /vehicles/{vehicleId}/driver:
+    put:
+      summary: Pair a driver with a vehicle, or unpair with null (dispatcher only)
+      description: A driver sits in one vehicle; pairing him here unpairs him from any other. Running missions are not changed.
+      operationId: setVehicleDriver
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: vehicleId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [driver_id], properties: {driver_id: {type: [string, "null"]}}}
+      responses:
+        '200': {description: Vehicle., content: {application/json: {schema: {$ref: '#/components/schemas/VehicleSummary'}}}}
+        '404': {description: Unknown vehicle.}
+        '409': {description: The driver was paired elsewhere at the same moment; retry.}
+        '422': {description: "Unknown, revoked or expired driver."}
+
+  /vehicles/{vehicleId}/pings:
+    post:
+      summary: Driver GPS ping
+      description: >
+        Only the driver assigned to an active mission using this vehicle. The phone clock may be wrong: the server
+        stores its own receive time (minus the fix's age when sent_at is given, e.g. for pings queued offline) and
+        returns the measured clock skew. Rejects (0, 0), fixes older than 300 s, and jumps faster than 250 km/h beyond
+        1 km plus the reported accuracies (compared with a fix from the last 10 minutes). 429 if faster than once per second.
+      operationId: postPing
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: vehicleId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PingRequest'}}}
+      responses:
+        '201': {description: Stored., content: {application/json: {schema: {$ref: '#/components/schemas/PingResult'}}}}
         '403': {description: Not the assigned driver/vehicle.}
-        '422': {description: Invalid or out-of-window ts.}
+        '422': {description: "Invalid body, (0, 0), old fix or impossible jump."}
         '429': {description: Rate limited.}
 
   /vehicles/{vehicleId}/position:
@@ -220,195 +259,165 @@ paths:
       parameters:
         - {name: vehicleId, in: path, required: true, schema: {type: string}}
       responses:
-        '200':
-          description: Latest position.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VehiclePosition'
+        '200': {description: Latest position., content: {application/json: {schema: {$ref: '#/components/schemas/VehiclePosition'}}}}
         '404': {description: No ping yet.}
 
-  /missions/{missionId}/status:
-    patch:
-      summary: Update mission lifecycle status
-      description: Toggled only by the device of the driver assigned to this mission (token subject must match the assigned vehicle/driver), or by hospital check-in. Other callers get 403.
-      operationId: updateMissionStatus
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: missionId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MissionStatusUpdate'
-      responses:
-        '200':
-          description: Status updated successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Mission'
-
-  /preemption/trigger:
-    post:
-      summary: Send emergency signal preemption command to Traffic Management Center (TMC)
-      description: Sent by the Corridor Engine when an active mission reaches the ETA threshold of an intersection.
-      operationId: triggerPreemption
-      tags: [Internal-Preemption]
-      servers:
-        - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
-          description: Internal only, private network/VPN. Not internet-facing.
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PreemptionTriggerRequest'
-      responses:
-        '200':
-          description: Preemption acknowledged by signal controller.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PreemptionResponse'
-        '403':
-          description: Preemption rejected (Anti-abuse validation failed).
-
-  /preemption/release:
-    post:
-      summary: Release signal preemption hold
-      description: Sent immediately after the ambulance clears the intersection or times out.
-      operationId: releasePreemption
-      tags: [Internal-Preemption]
-      servers:
-        - url: https://tmc-link.internal.ambulance-aid.gov.bd/v1
-          description: Internal only, private network/VPN. Not internet-facing.
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PreemptionReleaseRequest'
-      responses:
-        '200':
-          description: Preemption released; controller returning to coordinated cycle.
-
-  /ambulances/available:
+  /drivers:
     get:
-      summary: Query nearby available ambulances
-      description: Public & 999 endpoint to discover available emergency vehicles within a radius.
-      operationId: getAvailableAmbulances
-      parameters:
-        - name: latitude
-          in: query
-          required: true
-          schema:
-            type: number
-            format: double
-        - name: longitude
-          in: query
-          required: true
-          schema:
-            type: number
-            format: double
-        - name: radius_km
-          in: query
-          required: false
-          schema:
-            type: number
-            default: 5.0
-        - name: tier
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [BLS, ALS, ICU, NICU]
+      summary: List drivers with phone and token state (dispatcher only)
+      operationId: listDrivers
+      security: [{BearerAuth: []}]
       responses:
         '200':
-          description: List of available ambulances.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AmbulancePublicSummary'
+          description: Drivers.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DriverSummary'}}}}
+    post:
+      summary: Register a driver; the bearer token is returned once (admin only)
+      operationId: createDriver
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 200}
+                phone: {$ref: '#/components/schemas/PhoneIn'}
+      responses:
+        '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/DriverCreated'}}}}
+        '403': {description: Not an admin.}
+        '422': {description: Invalid name or phone.}
+        '429': {description: Create rate limit.}
+
+  /drivers/{driverId}:
+    patch:
+      summary: Set or clear a driver's phone (dispatcher only)
+      operationId: updateDriver
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [phone], properties: {phone: {$ref: '#/components/schemas/PhoneIn'}}}
+      responses:
+        '200': {description: Driver., content: {application/json: {schema: {$ref: '#/components/schemas/DriverSummary'}}}}
+        '404': {description: Unknown driver.}
+        '422': {description: Not a Bangladesh mobile number.}
+
+  /drivers/{driverId}/token/rotate:
+    post:
+      summary: Replace a driver's bearer token and re-enable a revoked driver (admin only)
+      operationId: rotateDriverToken
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: New token, shown once.
+          content: {application/json: {schema: {type: object, required: [driver_id, token, expires_at], properties: {driver_id: {type: string}, token: {type: string}, expires_at: {type: string, format: date-time}}}}}
+        '403': {description: Not an admin.}
+        '404': {description: Unknown driver.}
+
+  /drivers/{driverId}/token/revoke:
+    post:
+      summary: Revoke a driver's bearer token and pairing code until an admin issues new ones (admin only)
+      operationId: revokeDriverToken
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Revoked.}
+        '403': {description: Not an admin.}
+        '404': {description: Unknown driver.}
+
+  /drivers/{driverId}/pairing-code:
+    post:
+      summary: Issue a 6-digit, single-use pairing code valid for 10 minutes, replacing any earlier one (admin only)
+      description: Only its hash is stored. The driver enters it in the app, which calls POST /pair.
+      operationId: issuePairingCode
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: driverId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Code, shown once.", content: {application/json: {schema: {$ref: '#/components/schemas/PairingCode'}}}}
+        '403': {description: Not an admin.}
+        '404': {description: Unknown driver.}
+
+  /users:
+    get:
+      summary: List all users with role and token state (admin only)
+      operationId: listUsers
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: Users.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/UserSummary'}}}}
+        '403': {description: Not an admin.}
+    post:
+      summary: Create a dispatcher, or with admin=true another admin; the token is returned once (admin only)
+      description: Drivers are created with POST /drivers.
+      operationId: createUser
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: {name: {type: string, minLength: 1, maxLength: 200}, admin: {type: boolean, default: false}}
+      responses:
+        '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/UserCreated'}}}}
+        '403': {description: Not an admin.}
+        '429': {description: Create rate limit.}
+
+  /users/{userId}/token/revoke:
+    post:
+      summary: Revoke any user's token at once, dispatchers and admins included (admin only)
+      description: Recovery when an admin token itself is stolen is `python -m app.bootstrap revoke USER_ID` on the server.
+      operationId: revokeUserToken
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Revoked.}
+        '403': {description: Not an admin.}
+        '404': {description: Unknown user.}
 
 components:
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
-    MutualTLS:
-      type: mutualTLS
-      description: Client certificate verified at the TLS layer (OpenAPI 3.1). Identity is never taken from a request header.
+      bearerFormat: opaque
+      description: Random 256-bit token per user, stored as SHA-256. Expires 90 days after last use.
 
   schemas:
-    TelemetryPing:
+    Health:
       type: object
-      required:
-        - vehicle_id
-        - timestamp
-        - latitude
-        - longitude
-        - heading
-        - speed_kph
-        - siren_engaged
-      properties:
-        vehicle_id:
-          type: string
-          example: "AMB-DHK-CH-71-4921"
-        timestamp:
-          type: string
-          format: date-time
-        latitude:
-          type: number
-          format: double
-          example: 23.8103
-        longitude:
-          type: number
-          format: double
-          example: 90.4125
-        heading:
-          type: number
-          format: float
-          example: 184.5
-        speed_kph:
-          type: number
-          format: float
-          example: 42.5
-        siren_engaged:
-          type: boolean
-          example: true
-        active_mission_id:
-          type: string
-          format: uuid
-          nullable: true
-          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
+      additionalProperties: false
+      required: [ok]
+      properties: {ok: {type: boolean}}
+
+    Timestamp:
+      type: [string, "null"]
+      format: date-time
 
     MissionCreateRequest:
-      description: MVP shape implemented in backend/. Caller phone, coordinates, tier and hospital are not yet implemented.
+      description: Caller phone, tier and hospital are not implemented.
       type: object
       required: [pickup_address]
       properties:
-        pickup_address:
-          type: string
-          minLength: 1
+        pickup_address: {type: string, minLength: 1, maxLength: 200}
         assigned_vehicle_id:
           type: [string, "null"]
         assigned_driver_id:
           type: [string, "null"]
+          description: Omit to take the vehicle's paired driver; null for no driver.
         pickup_lat:
           type: [number, "null"]
           minimum: -90
@@ -425,54 +434,66 @@ components:
 
     MissionStatusUpdate:
       type: object
-      required:
-        - status
+      additionalProperties: false
+      required: [status]
       properties:
-        status:
-          $ref: '#/components/schemas/MissionStatus'
-        notes:
+        status: {$ref: '#/components/schemas/MissionStatus'}
+        reason:
           type: string
-          example: "Patient vitals stabilized, oxygen on at 10L/min"
+          minLength: 1
+          maxLength: 200
+          description: Dispatchers only; required when making the driver's move for them.
+        event_time:
+          type: string
+          format: date-time
+          description: Dispatchers only; when it really happened (between mission creation and now). Defaults to now.
 
     Mission:
       type: object
       additionalProperties: false
-      required: [mission_id, status, pickup_address, pickup_lat, pickup_lng, assigned_vehicle_id, assigned_driver_id, created_at, updated_at]
+      required: [mission_id, status, pickup_address, pickup_lat, pickup_lng, assigned_vehicle_id, assigned_driver_id,
+                 created_at, updated_at, acknowledged_at, en_route_pickup_at, at_scene_at, transporting_patient_at,
+                 at_hospital_at, completed_at, cancelled_at]
       properties:
         mission_id:
           type: string
           format: uuid
-          description: Non-guessable random identifier (UUIDv7/v4 or ULID). Never sequential or date-based.
-          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
-        status:
-          $ref: '#/components/schemas/MissionStatus'
-        assigned_vehicle_id:
-          type: [string, "null"]
-          example: "AMB-DHK-CH-71-4921"
-        assigned_driver_id:
-          type: [string, "null"]
+          description: Random UUIDv4. Never sequential or date-based.
+        status: {$ref: '#/components/schemas/MissionStatus'}
+        assigned_vehicle_id: {type: [string, "null"]}
+        assigned_driver_id: {type: [string, "null"]}
         pickup_address:
           type: string
           example: "House 12, Road 4, Mirpur-10, Dhaka"
         pickup_lat: {type: [number, "null"], minimum: -90, maximum: 90}
         pickup_lng: {type: [number, "null"], minimum: -180, maximum: 180}
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+        created_at: {type: string, format: date-time, description: Also the DISPATCHED time.}
+        updated_at: {type: string, format: date-time}
+        acknowledged_at: {$ref: '#/components/schemas/Timestamp'}
+        en_route_pickup_at: {$ref: '#/components/schemas/Timestamp'}
+        at_scene_at: {$ref: '#/components/schemas/Timestamp'}
+        transporting_patient_at: {$ref: '#/components/schemas/Timestamp'}
+        at_hospital_at: {$ref: '#/components/schemas/Timestamp'}
+        completed_at: {$ref: '#/components/schemas/Timestamp'}
+        cancelled_at: {$ref: '#/components/schemas/Timestamp'}
 
     Me:
       type: object
       additionalProperties: false
-      required: [role, user_id]
+      required: [role, user_id, admin]
       properties:
         role: {type: string, enum: [dispatcher, driver]}
         user_id: {type: string}
+        admin: {type: boolean, description: May create users and mint/rotate/revoke tokens.}
         token_expires_at: {type: [string, "null"], format: date-time}
         driver_id: {type: string}
         vehicle_id: {type: [string, "null"]}
+
+    TokenRotated:
+      type: object
+      additionalProperties: false
+      required: [token, expires_at]
+      properties: {token: {type: string}, expires_at: {type: string, format: date-time}}
 
     Transitions:
       type: object
@@ -481,131 +502,149 @@ components:
     VehicleSummary:
       type: object
       additionalProperties: false
-      required: [vehicle_id, operator, registration, active, last_ping]
+      required: [vehicle_id, operator, registration, active, driver_id, busy, last_position]
       properties:
         vehicle_id: {type: string}
         operator: {type: string}
         registration: {type: string}
         active: {type: boolean}
-        last_ping:
+        driver_id: {type: [string, "null"], description: Paired driver.}
+        busy: {type: boolean, description: Has an active mission.}
+        last_position:
           type: [object, "null"]
-          required: [lat, lng, ts]
-          properties: {lat: {type: number}, lng: {type: number}, ts: {type: string, format: date-time}}
+          additionalProperties: false
+          required: [lat, lng, accuracy, ts, stale]
+          properties:
+            lat: {type: number}
+            lng: {type: number}
+            accuracy: {type: [number, "null"], description: "Metres, as reported by the phone."}
+            ts: {type: string, format: date-time}
+            stale: {type: boolean, description: Older than 120 s.}
+
+    PhoneIn:
+      type: [string, "null"]
+      description: >
+        Bangladesh mobile number: 01XXXXXXXXX, 8801XXXXXXXXX or +8801XXXXXXXXX, Bangla digits, spaces and hyphens
+        allowed. Stored as +8801XXXXXXXXX. Anything else is 422.
+      example: "০১৭১১-২৩৪৫৬৭"
+
+    Phone:
+      type: [string, "null"]
+      pattern: '^\+8801[3-9][0-9]{8}$'
 
     DriverSummary:
       type: object
       additionalProperties: false
-      required: [driver_id, name]
-      properties: {driver_id: {type: string}, name: {type: string}}
+      required: [driver_id, name, phone, revoked, expires_at]
+      properties:
+        driver_id: {type: string}
+        name: {type: string}
+        phone: {$ref: '#/components/schemas/Phone'}
+        revoked: {type: boolean}
+        expires_at: {type: string, format: date-time, description: Token expiry; revoked or expired drivers cannot be assigned.}
 
     DriverCreated:
       type: object
       additionalProperties: false
-      required: [driver_id, name, token]
-      properties: {driver_id: {type: string}, name: {type: string}, token: {type: string, description: Shown once.}}
+      required: [driver_id, name, phone, token]
+      properties:
+        driver_id: {type: string}
+        name: {type: string}
+        phone: {$ref: '#/components/schemas/Phone'}
+        token: {type: string, description: Shown once.}
+
+    PairingCode:
+      type: object
+      additionalProperties: false
+      required: [driver_id, code, expires_at]
+      properties:
+        driver_id: {type: string}
+        code: {type: string, pattern: '^[0-9]{6}$'}
+        expires_at: {type: string, format: date-time}
+
+    PairRequest:
+      type: object
+      required: [code]
+      properties: {code: {type: string, description: '6 digits; Bangla digits accepted.', example: "042917"}}
+
+    PairResult:
+      type: object
+      additionalProperties: false
+      required: [token, user]
+      properties:
+        token: {type: string, description: Shown once.}
+        user:
+          type: object
+          additionalProperties: false
+          required: [user_id, name, role, driver_id, token_expires_at]
+          properties:
+            user_id: {type: string}
+            name: {type: string}
+            role: {type: string, enum: [driver]}
+            driver_id: {type: string}
+            token_expires_at: {type: string, format: date-time}
+
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [user_id, name, role, admin, revoked, expires_at]
+      properties:
+        user_id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [dispatcher, driver]}
+        admin: {type: boolean}
+        revoked: {type: boolean}
+        expires_at: {type: string, format: date-time}
+
+    UserCreated:
+      type: object
+      additionalProperties: false
+      required: [user_id, name, role, admin, token]
+      properties:
+        user_id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [dispatcher]}
+        admin: {type: boolean}
+        token: {type: string, description: Shown once.}
 
     AuditEntry:
       type: object
       additionalProperties: false
-      required: [user_id, from_status, to_status, ts]
+      required: [user_id, from_status, to_status, ts, on_behalf_of, reason, event_time]
       properties:
-        user_id: {type: string}
+        user_id: {type: string, description: Who made the change.}
         from_status: {type: [string, "null"]}
         to_status: {$ref: '#/components/schemas/MissionStatus'}
-        ts: {type: string, format: date-time}
+        ts: {type: string, format: date-time, description: Server time of the change.}
+        on_behalf_of: {type: [string, "null"], description: Driver id when a dispatcher made the driver's move.}
+        reason: {type: [string, "null"]}
+        event_time: {$ref: '#/components/schemas/Timestamp'}
+
+    PingRequest:
+      type: object
+      required: [lat, lng, ts]
+      properties:
+        lat: {type: number, minimum: -90, maximum: 90}
+        lng: {type: number, minimum: -180, maximum: 180}
+        ts: {type: string, format: date-time, description: "When the fix was taken (phone clock, with timezone)."}
+        sent_at: {type: string, format: date-time, description: Phone clock when sent; with ts it gives the fix's age.}
+        accuracy: {type: number, minimum: 0, maximum: 100000, description: Metres (coords.accuracy).}
+
+    PingResult:
+      type: object
+      additionalProperties: false
+      required: [ok, clock_skew_s]
+      properties:
+        ok: {type: boolean}
+        clock_skew_s: {type: number, description: "Phone clock minus server clock, seconds. Warn the driver above 60."}
 
     VehiclePosition:
       type: object
       additionalProperties: false
-      required: [vehicle_id, lat, lng, ts]
+      required: [vehicle_id, lat, lng, accuracy, ts]
       properties:
         vehicle_id: {type: string}
         lat: {type: number}
         lng: {type: number}
-        ts: {type: string, format: date-time}
-
-    PreemptionTriggerRequest:
-      type: object
-      required:
-        - junction_id
-        - mission_id
-        - target_approach
-        - estimated_arrival_seconds
-        - max_hold_seconds
-        - lease_token
-      properties:
-        lease_token:
-          type: string
-          description: Short-lived JWT signed with Ed25519 (alg EdDSA) by the corridor engine. The controller verifies it before acting.
-          example: "eyJhbGciOiJFZERTQSIs..."
-        junction_id:
-          type: string
-          example: "DHK_MIRPUR_10_01"
-        mission_id:
-          type: string
-          format: uuid
-          description: Non-guessable random identifier (UUIDv7/v4 or ULID). Never sequential or date-based.
-          example: "018f3c5e-7b2a-7c4e-9d1a-3f5b8e2c4a61"
-        target_approach:
-          type: string
-          example: "NORTH_TO_SOUTH"
-        estimated_arrival_seconds:
-          type: integer
-          example: 75
-        max_hold_seconds:
-          type: integer
-          example: 90
-
-    PreemptionResponse:
-      type: object
-      properties:
-        preemption_id:
-          type: string
-          example: "PRE-20261012-00431"
-        status:
-          type: string
-          enum: [QUEUED, IN_TRANSITION, HOLDING_GREEN, REJECTED]
-          example: "IN_TRANSITION"
-        clearance_duration_seconds:
-          type: integer
-          example: 8
-
-    PreemptionReleaseRequest:
-      type: object
-      required:
-        - junction_id
-        - preemption_id
-      properties:
-        junction_id:
-          type: string
-          example: "DHK_MIRPUR_10_01"
-        preemption_id:
-          type: string
-          example: "PRE-20261012-00431"
-
-    AmbulancePublicSummary:
-      type: object
-      properties:
-        vehicle_id:
-          type: string
-          example: "AMB-DHK-CH-71-4921"
-        tier:
-          type: string
-          enum: [BLS, ALS, ICU, NICU]
-          example: "ALS"
-        operator_name:
-          type: string
-          example: "Square Hospital Emergency Fleet"
-        current_distance_km:
-          type: number
-          format: float
-          example: 1.8
-        estimated_pickup_minutes:
-          type: integer
-          example: 7
-        base_fare_bdt:
-          type: integer
-          example: 2500
-        per_km_bdt:
-          type: integer
-          example: 120
+        accuracy: {type: [number, "null"]}
+        ts: {type: string, format: date-time, description: "Server receive time (minus the fix's age, if sent)."}

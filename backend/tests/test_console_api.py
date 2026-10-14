@@ -1,6 +1,6 @@
 import pytest
 
-from tests.test_api import env, iso, mk  # noqa: F401
+from tests.test_api import env, free, iso, mk  # noqa: F401
 
 DISPATCHER_ONLY = [("get", "/vehicles"), ("get", "/drivers"), ("post", "/vehicles"), ("post", "/drivers"),
                    ("get", "/missions/00000000-0000-4000-8000-000000000000/audit")]
@@ -37,7 +37,11 @@ def test_current_mission(env):
     assert c.get(f"/missions/{m}", headers=env["V2"]).status_code == 403
     for s in ["EN_ROUTE_PICKUP", "AT_SCENE", "TRANSPORTING_PATIENT", "AT_HOSPITAL", "COMPLETED"]:
         c.patch(f"/missions/{m}/status", json={"status": s}, headers=env["V"])
-    assert c.get("/missions/current", headers=env["V"]).status_code == 404  # terminal
+    r = c.get("/missions/current", headers=env["V"])  # just ended: still shown, with its status (B15)
+    assert r.status_code == 200 and r.json()["status"] == "COMPLETED"
+    assert c.get("/me", headers=env["V"]).json()["vehicle_id"] is None  # but no more pings
+    env["db"].execute("UPDATE missions SET updated_at='2000-01-01T00:00:00+00:00'"); env["db"].commit()
+    assert c.get("/missions/current", headers=env["V"]).status_code == 404  # ended long ago
 
 
 def test_transitions_role_aware_and_match_patch(env):
@@ -52,6 +56,7 @@ def test_transitions_role_aware_and_match_patch(env):
     for hdr, tr in ((env["V"], drv), (env["D"], dis)):
         for src, dsts in tr.items():
             for dst in dsts:
+                free(env)
                 m = mk(env)
                 env["db"].execute("UPDATE missions SET status=? WHERE id=?", (src, m)); env["db"].commit()
                 assert c.patch(f"/missions/{m}/status", json={"status": dst}, headers=hdr).status_code == 200, (src, dst)
@@ -60,15 +65,16 @@ def test_transitions_role_aware_and_match_patch(env):
 def test_vehicles(env):
     c = env["c"]
     r = c.post("/vehicles", json={"operator": "Op", "registration": "DHK-9"}, headers=env["D"])
-    assert r.status_code == 201 and r.json()["active"] is True
+    assert r.status_code == 201 and r.json()["active"] is True and r.json()["busy"] is False
     assert c.post("/vehicles", json={"operator": "Op", "registration": "DHK-9"}, headers=env["D"]).status_code == 409
     assert c.post("/vehicles", json={"operator": "", "registration": "x"}, headers=env["D"]).status_code == 422
     mk(env)
     c.post(f"/vehicles/{env['veh']}/pings", json={"lat": 1, "lng": 2, "ts": iso()}, headers=env["V"])
     by = {v["vehicle_id"]: v for v in c.get("/vehicles", headers=env["D"]).json()}
-    assert len(by) == 3 and by[r.json()["vehicle_id"]]["last_ping"] is None
-    p = by[env["veh"]]["last_ping"]
-    assert (p["lat"], p["lng"]) == (1, 2) and p["ts"]
+    assert len(by) == 3 and by[r.json()["vehicle_id"]]["last_position"] is None
+    p = by[env["veh"]]["last_position"]
+    assert (p["lat"], p["lng"], p["accuracy"], p["stale"]) == (1, 2, None, False) and p["ts"]
+    assert by[env["veh"]]["busy"] is True and by[env["veh2"]]["busy"] is False
 
 
 def test_drivers_token_once(env):
@@ -103,6 +109,6 @@ def test_pickup_coords(env):
     r = c.post("/missions", json={"pickup_address": "x", "pickup_lat": 23.78, "pickup_lng": 90.41}, headers=env["D"])
     assert r.status_code == 201 and (r.json()["pickup_lat"], r.json()["pickup_lng"]) == (23.78, 90.41)
     assert c.get(f"/missions/{r.json()['mission_id']}", headers=env["D"]).json()["pickup_lat"] == 23.78
-    assert mk(env) and c.get("/missions", headers=env["D"]).json()[-1]["pickup_lat"] is None
+    assert mk(env) and c.get("/missions", headers=env["D"]).json()[0]["pickup_lat"] is None
     for bad in ({"pickup_lat": 91, "pickup_lng": 0}, {"pickup_lat": 0, "pickup_lng": -181}, {"pickup_lat": 1}):
         assert c.post("/missions", json={"pickup_address": "x", **bad}, headers=env["D"]).status_code == 422
