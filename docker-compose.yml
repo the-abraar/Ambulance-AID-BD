@@ -47,6 +47,7 @@ services:
       FORWARDED_ALLOW_IPS: "*"
       AMBULANCE_SMS_API_KEY: ${AMBULANCE_SMS_API_KEY:-}  # both set = SMS fallback on; see backend/README.md
       AMBULANCE_SMS_SENDER_ID: ${AMBULANCE_SMS_SENDER_ID:-}
+      AMBULANCE_ANDROID_CERT_SHA256: ${AMBULANCE_ANDROID_CERT_SHA256:-}  # release key; lets the pairing QR open the app
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 10s

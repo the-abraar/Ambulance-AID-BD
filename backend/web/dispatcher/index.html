@@ -34,7 +34,15 @@
       </label>
       <details>
         <summary>Back-fill from a paper log</summary>
-        <label>Dispatched at, Dhaka time (the driver is not alerted) <input name="dispatched" type="datetime-local" step="1"></label>
+        <p class="warn">Records a mission that is already over. The driver is not alerted and a busy vehicle may be
+          picked. Dhaka time; leave a step empty if the log has no time for it.</p>
+        <label>Dispatched at <input name="dispatched" type="datetime-local" step="1"></label>
+        <label>En route pickup at <input name="bf_EN_ROUTE_PICKUP" type="datetime-local" step="1"></label>
+        <label>At scene at <input name="bf_AT_SCENE" type="datetime-local" step="1"></label>
+        <label>Transporting patient at <input name="bf_TRANSPORTING_PATIENT" type="datetime-local" step="1"></label>
+        <label>At hospital at <input name="bf_AT_HOSPITAL" type="datetime-local" step="1"></label>
+        <label>Ended as <select name="bf_end"><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select></label>
+        <label>Ended at (required) <input name="bf_end_at" type="datetime-local" step="1"></label>
       </details>
       <button>Dispatch</button>
     </form>
@@ -115,7 +123,10 @@
 </dialog>
 <dialog id="pair-dlg" aria-labelledby="pair-h">
   <h2 id="pair-h">Pair <span id="pair-name"></span>'s phone</h2>
-  <p>On the driver's phone, scan the QR code, or open <code id="pair-url"></code> and type the code. One use, valid until <span id="pair-exp"></span> (Dhaka time).</p>
+  <p>On a phone with the Ambulance Driver app: open the app and type the code. Scanning the QR code opens the app only
+    once the server has the app's key (<code>AMBULANCE_ANDROID_CERT_SHA256</code>); otherwise it opens the browser
+    version, which signs the app out. Other phones: scan the QR code, or open <code id="pair-url"></code> and type the
+    code. One use, valid until <span id="pair-exp"></span> (Dhaka time).</p>
   <p id="pair-code" class="code"></p>
   <canvas id="pair-qr" width="0" height="0" role="img"></canvas>
   <form method="dialog"><button>Done</button></form>

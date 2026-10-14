@@ -32,13 +32,19 @@ Plain HTML/CSS/JS, no build. Sign in with a dispatcher or admin token (`python -
   after 2 minutes turns red and raises a banner. It also beeps on every poll, once "Turn on alarm sound" has been
   clicked (browsers allow audio only after a click).
 - **Cancel:** a dialog shows the address, a reason is required, and the red button stands apart. Enter keeps the mission.
-- **On behalf:** for a driver who cannot tap (dead phone, back-fill after an outage). "On behalf: <next step>" asks for a
-  reason (required) and when it happened (optional, Dhaka time). The audit records you acting for the driver.
+- **On behalf:** for a driver who cannot tap (dead phone, radio call). "On behalf: <next step>" asks for a reason
+  (required) and when it happened (optional, Dhaka time, not before the previous step). The audit records you acting
+  for the driver.
+- **Back-fill from a paper log** (in the new-mission form, after an outage): the dispatch time, each step's time (empty
+  if the log has none), how it ended and when. The mission is recorded already over, so a busy vehicle may be picked
+  and the driver is not alerted.
 - **Times:** Dhaka time (UTC+6) everywhere, including the audit drawer, whatever the PC's time zone.
 - **Vehicles:** any dispatcher pairs a driver with a vehicle ("Pair driver with vehicle"; "(nobody)" unpairs).
 - **Drivers:** everyone sees the phone, the token state (valid until, revoked, expired) and a list of tokens expiring
   within 7 days. Admins only: "Add driver" (name, optional phone), then a pairing dialog with a 6-digit code (one use,
-  10 minutes) and a QR code of `/driver/#pair=CODE`. "Pairing code" issues a new one. "Show token" rotates the token
+  10 minutes) and a QR code of `/driver/#pair=CODE`. The dialog tells drivers with the Android app to type the code in
+  the app: the QR opens the app only once App Links are set up (`docs/android-wrapper.md`), and pairing the browser
+  instead signs the app out. "Pairing code" issues a new one. "Show token" rotates the token
   and shows the raw value: avoid it, because a pasted token lives in the chat for 90 days. "Revoke" signs the driver out.
 - **Network:** polls `/vehicles`, `/drivers` and `/missions?active=true` every 5 s, plus the shown page in History.
   `/meta/transitions` (normal and `on_behalf=true`) is fetched once at sign-in.
@@ -65,8 +71,6 @@ files. `scripts/lint-innerhtml.sh` skips `vendor/`: minified Leaflet is not ours
 - Background tabs throttle timers (Chrome may poll once a minute after 5 minutes hidden), so the alarm can be late.
   Keep the console tab visible.
 - Tables re-render on every poll, so keyboard focus inside a table is lost every 5 s.
-- Back-filling an outage: the API accepts an event time only between the mission's creation and now, so a mission
-  entered after the outage cannot carry earlier real times.
 
 ## Driver app (`driver/`)
 
@@ -92,8 +96,14 @@ shell, never API calls. Bump its cache name `C` whenever you change a cached fil
 - **Server feedback:** if a ping's `clock_skew_s` is over 60, the app tells the driver to fix the phone clock (tracking
   still works). For 10 minutes after a mission ends, the app shows "Cancelled by dispatcher" or "Mission completed".
 - **Android wrapper:** when `window.AmbulanceNative` exists and a mission is active with a vehicle, the app calls
-  `startTracking(JSON.stringify({baseUrl: location.origin, token, vehicleId, missionId}))`. It calls it again when the
-  token or mission changes, and on page load when `isTracking()` is false (a running service is adopted as is).
+  `startTracking(JSON.stringify({baseUrl: location.origin, token, vehicleId, missionId, shift}))`. It calls it again
+  when the token, mission or shift changes, and on page load when `isTracking()` is false (a running service is adopted
+  as is). It calls it only while the page is visible (a service started from the background gets no location), and
+  again as soon as the page becomes visible.
+- **Shift (wrapper only):** a driver paired with an in-service vehicle (`/me` `paired_vehicle_id`) gets "Start shift" /
+  "End shift". On shift, between missions, the app starts native tracking of the paired vehicle with `missionId: ""`
+  and `shift: true`: the service reports it once a minute and rings for new missions (`docs/android-wrapper.md`).
+  Sign-out ends the shift. A plain browser has no shift: it cannot track or ring in the background.
   While the service runs, the web GPS watch stays off, so the server never gets two pings for one fix. If
   `startTracking` returns false (for example, it refused the `baseUrl`), the web path pings instead and the app retries
   native on the next poll. `stopTracking()` runs (if `isTracking()`) when the mission ends or is cancelled, and on
@@ -106,4 +116,4 @@ Limits:
 - Geolocation, wake lock and notifications need HTTPS or localhost.
 - In a plain browser tab, Android stops GPS when the screen is off or the app is in the background, for example after
   Navigate opens Maps. This is UNVERIFIED on a device; the wrapper is the fix.
-- An Android WebView has no Notification API, so inside the wrapper the native side must notify.
+- An Android WebView has no Notification API, so inside the wrapper the native side notifies, and only on shift.

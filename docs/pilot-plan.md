@@ -42,7 +42,7 @@ What is stored (current backend):
 - Users (dispatcher, driver): name/handle, role, hashed token. No plaintext tokens.
 - Vehicles and drivers: registration label, operator, driver identity link.
 - Missions: id (UUID), assigned driver and vehicle, status, timestamps.
-- GPS pings: vehicle position and timestamp, tied to a non-terminal mission.
+- GPS pings: vehicle position and timestamp, during a mission, and between missions while the driver is on shift in the Android app (one kept per 30 s, from the driver paired with that vehicle only). Exact rules: `docs/driver-consent-bn-draft.md` point 2.
 - Audit log: who changed which mission from which state to which state, and when.
 - Not collected in the pilot: patient names, vitals, medical condition, caller phone numbers. Do not add them without a legal opinion and consent text.
 
@@ -56,7 +56,7 @@ Driver consent: drivers are told in writing (Bangla), before enrolment, what is 
 - The tool is advisory only. It never controls, requests or influences traffic signals. No signal code exists and none is added in this pilot.
 - It does not give medical advice or triage and does not replace the operator's existing procedures.
 - Drivers must not interact with the app while the vehicle is moving; state changes are made when stopped, or the driver says them by phone and the dispatcher records them on the driver's behalf with a reason (the console's "On behalf: <step>" button, with a required reason and an optional "When it happened" time in Dhaka time). The audit log names the dispatcher as the actor and the driver as `on_behalf_of`.
-- When the system is down (outage, bad data, no connectivity): operators revert immediately to phone/radio dispatch exactly as before the pilot. The operator keeps the manual procedure and contact list active throughout the pilot. Missions run during an outage are back-filled afterwards by the dispatcher as on-behalf status changes with the reason "outage, paper log". The audit row keeps both the entry time and the real time from the paper log (up to 7 days back).
+- When the system is down (outage, bad data, no connectivity): operators revert immediately to phone/radio dispatch exactly as before the pilot. The operator keeps the manual procedure and contact list active throughout the pilot. Missions run during an outage are back-filled afterwards by the dispatcher from the paper log ("Back-fill from a paper log" in the console), recorded already over, with the reason "back-fill". The audit rows keep both the entry time and the real times from the paper log (up to 7 days back).
 - Downtime is logged and reported. No uptime target is promised yet (UNKNOWN until measured).
 - Incident process: any incident involving a patient or collision pauses the pilot for review.
 

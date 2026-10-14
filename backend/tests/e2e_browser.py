@@ -244,6 +244,27 @@ def run(base, dtok, ctok):
         ok(re.fullmatch(r"\d+:\d\d", cell(6)) and cell(7) == "waiting", f"elapsed and acknowledgement columns ({cell(6)}, {cell(7)})")
         ok(opts() == [["DHK-E2E · Rahim (busy)", True]], "busy vehicle cannot be dispatched twice")
 
+        # N6: back-fill a paper-log mission onto the busy vehicle: written already over, the driver is not alerted
+        t0 = (datetime.now(DHAKA) - timedelta(hours=2)).replace(second=7, microsecond=0)
+        local = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S")
+        con.click("#newm summary")
+        con.fill("#newm [name=addr]", "Paper-log-1")
+        con.fill("#newm [name=dispatched]", local(t0))
+        ok(opts() == [["DHK-E2E · Rahim (busy)", False]], "back-fill: the busy vehicle can be picked")
+        con.select_option("#newm [name=veh]", label="DHK-E2E · Rahim (busy)")
+        con.fill("#newm [name=bf_AT_SCENE]", local(t0 + timedelta(minutes=12)))
+        con.fill("#newm [name=bf_end_at]", local(t0 + timedelta(minutes=50)))
+        shot(con, "console_1280_backfill.png", "console 1280x800, back-fill form: a paper-log mission on the busy vehicle, step times")
+        con.click("#newm button:has-text('Dispatch')")
+        wait(con, "!document.querySelector('#newm [name=dispatched]').value")
+        bf = next(x for x in api(base, dtok, "/missions") if x["pickup_address"] == "Paper-log-1")
+        ok(bf["status"] == "COMPLETED" and dhaka(bf["created_at"]) == t0.strftime("%Y-%m-%d %H:%M:%S")
+           and bf["en_route_pickup_at"] is None and dhaka(bf["at_scene_at"]) == (t0 + timedelta(minutes=12)).strftime("%Y-%m-%d %H:%M:%S")
+           and dhaka(bf["completed_at"]) == (t0 + timedelta(minutes=50)).strftime("%Y-%m-%d %H:%M:%S"),
+           "back-fill recorded COMPLETED with the paper log's Dhaka times; an empty step stays unknown")
+        ok(api(base, dr_tok, "/missions/current")["mission_id"] == m1["mission_id"] and opts() == [["DHK-E2E · Rahim (busy)", True]],
+           "back-fill: the driver still sees only his live mission; the form resets and the vehicle is busy again")
+
         # the driver (played through the API) acknowledges and sends one fix with accuracy
         ack = call(base, "POST", f"/missions/{m1['mission_id']}/ack", dr_tok)
         call(base, "POST", f"/vehicles/{veh_id}/pings", dr_tok, {"lat": 23.78, "lng": 90.41, "ts": utcnow(), "accuracy": 35})
@@ -609,7 +630,7 @@ def bridge_checks(b, base, atok, page_in):
 
     mid = mission("Uttara-7")
     k.click("#rf"); k.wait_for_selector("#ack")
-    ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": mid}]],
+    ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": mid, "shift": False}]],
        "bridge: startTracking(baseUrl, token, vehicleId, missionId) when the mission is active")
     k.evaluate("c => { location.hash = '#pair=' + c; }", code())  # dispatcher re-pairs the phone: the token rotates
     wait_until(lambda: len(calls()) == 2 and calls()[1][1]["token"] == tok() != calls()[0][1]["token"],
@@ -650,7 +671,7 @@ def bridge_checks(b, base, atok, page_in):
     ok(calls()[-1][0] == "start" and calls()[-1][1]["token"] == tok() and calls()[-1][1]["missionId"] == m9,
        "typed code signs the revoked driver back in; native tracking restarts with the new token")
     k.reload(); k.wait_for_selector("#ack")  # WebView restarted, service not running
-    ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": m9}]],
+    ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": m9, "shift": False}]],
        "after a reload with an active mission and native tracking off, startTracking on load")
 
     k.click("#lo"); k.click("dialog button[data-v='']")
@@ -659,6 +680,44 @@ def bridge_checks(b, base, atok, page_in):
     ok(calls()[-1] == ["stop"] and tok() is None and k.evaluate("localStorage.getItem('driver_ping_queue')") is None,
        "confirmed sign-out stops native tracking and clears token and queue")
     ok(k.evaluate("__watches") == 0, "bridge: since the reload the web GPS watch never ran, so no double pings")
+
+    # N3: a hidden page never starts the wrapper's service (it would get no location); back on screen it starts at once
+    start = lambda m, shift: ["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": m, "shift": shift}]
+    k.fill("#code", code()); k.click("#f button"); k.wait_for_selector("#ack")
+    call(base, "PATCH", f"/missions/{m9}/status", atok, {"status": "CANCELLED", "reason": "e2e"})
+    k.click("#rf"); k.wait_for_selector(".card.ended")
+    ok(calls()[-1] == ["stop"] and k.inner_text("#shift").startswith("ডিউটি শুরু"),
+       "off shift, a mission's end stops native tracking; the wrapper offers 'Start shift' (paired vehicle)")
+    k.evaluate("Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'})")
+    m10, n = mission("Uttara-10"), len(calls())
+    k.evaluate("load()")
+    ok(k.is_visible("#ack") and len(calls()) == n and k.evaluate("__watches") == 0,
+       "N3: with the app hidden, a new mission calls neither startTracking nor the web GPS watch")
+    k.evaluate("delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange'))")
+    wait_until(lambda: calls()[-1] == start(m10, False), "N3: back on screen, startTracking at once")
+
+    # N1/N2: on shift the service reports the paired vehicle between missions and rings for new ones (native side)
+    call(base, "PATCH", f"/missions/{m10}/status", atok, {"status": "CANCELLED", "reason": "e2e"})
+    k.click("#rf"); k.wait_for_selector(".card.ended")
+    k.click("#shift")
+    wait_until(lambda: calls()[-1] == start("", True), "Start shift: startTracking with the paired vehicle, no mission, shift true")
+    ok("ডিউটিতে আছেন" in k.inner_text("#status") and k.inner_text("#shift") == "ডিউটি শেষ",
+       "on shift: Bangla notice and an 'End shift' button")
+    shot(k, "driver_360_on_shift.png", "driver app 360x740 in the wrapper, on shift between missions (Bangla notice)")
+    time.sleep(1.1)  # the web path pinged this vehicle a moment ago; the server allows 1 ping/s per vehicle
+    ok(call(base, "POST", f"/vehicles/{vid}/pings", tok(), {"lat": 23.87, "lng": 90.4, "ts": utcnow(), "on_shift": True})["ok"],
+       "the server accepts the wrapper's on-shift ping between missions (kept one per 30 s)")
+    v = next(x for x in api(base, atok, "/vehicles") if x["vehicle_id"] == vid)
+    ok(not v["busy"] and not v["last_position"]["stale"], "N2: the console sees the free vehicle with a fresh position")
+    m11 = mission("Uttara-11")
+    k.click("#rf"); k.wait_for_selector("#ack")
+    ok(calls()[-1] == start(m11, True), "on shift, a mission restarts native tracking with the mission, still on shift")
+    k.reload(); k.wait_for_selector("#ack")
+    ok(calls() == [start(m11, True)] and k.inner_text("#shift") == "ডিউটি শেষ", "the shift survives an app restart")
+    k.click("#shift"); k.wait_for_selector("text=ডিউটি শুরু (মিশনের অ্যালার্ম, প্রতি মিনিটে লোকেশন)")
+    ok(calls()[-1] == start(m11, False), "End shift during a mission: tracking goes on for the mission only")
+    k.click("#shift"); k.click("#lo"); k.click("dialog button[data-v='1']"); k.wait_for_selector("#code")
+    ok(calls()[-1] == ["stop"] and k.evaluate("localStorage.getItem('shift')") is None, "sign-out ends the shift too")
     ctx.close()
 
 

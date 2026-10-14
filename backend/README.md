@@ -26,6 +26,7 @@ After changing `requirements.txt`, regenerate it with the command in the lock fi
 | `AMBULANCE_PING_RETENTION_DAYS` | `90` | GPS pings older than this are deleted at startup and once a day. Minimum 1. |
 | `AMBULANCE_SMS_API_KEY`, `AMBULANCE_SMS_SENDER_ID` | unset | Both set = SMS fallback on (below). Either missing = off. |
 | `AMBULANCE_SMS_URL` | `https://bulksmsbd.net/api/smsapi` | Gateway endpoint; tests point it at a local fake. |
+| `AMBULANCE_ANDROID_CERT_SHA256` | unset | The Android app's signing-key SHA-256 fingerprints (`AB:CD:...`, comma-separated). Set = `/.well-known/assetlinks.json` lets the app open the console's pairing QR (App Link); unset = 404 and the QR opens the browser. A malformed value stops startup. |
 | `FORWARDED_ALLOW_IPS` | uvicorn: `127.0.0.1` | Behind Caddy, set it to Caddy's address so `POST /pair`'s per-client limit sees the phone's IP, not Caddy's. |
 
 `GET /healthz` (no auth) answers `{"ok": true}` when the DB is reachable and 503 otherwise. On Postgres a dead DB
@@ -33,10 +34,12 @@ answers only after the pool's 30 s connection timeout.
 
 ## Roles
 
-- **driver**: status moves, pings and `POST /missions/{id}/ack`, only for the mission assigned to them.
+- **driver**: status moves, pings and `POST /missions/{id}/ack`, only for the mission assigned to them; on shift,
+  also pings for the paired vehicle between missions.
 - **dispatcher**: creates, lists and cancels missions; pairs drivers with vehicles; may make a driver's forward move
-  for them (dead phone, back-fill after an outage) with a required `reason` and optional `event_time`; the audit row
-  then holds the dispatcher as `user_id` and the driver as `on_behalf_of`.
+  for them (dead phone) with a required `reason` and optional `event_time`; the audit row then holds the dispatcher as
+  `user_id` and the driver as `on_behalf_of`. Back-fills paper-log missions after an outage: `POST /missions` with
+  `dispatched_at` and `steps` writes the mission already over (no busy check, no SMS, no app alarm).
 - **admin** = a dispatcher with `users.admin` set: also creates users, mints, rotates and revokes tokens, and issues
   pairing codes. `GET /me` returns `admin`.
 
@@ -49,8 +52,12 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
 
 - Tokens: 256-bit random, stored as SHA-256, expire 90 days after last use (sliding; written at most once a day).
 - Pairing: `POST /drivers/{id}/pairing-code` (admin) gives a 6-digit code, single use, 10 minutes, stored hashed. The
-  driver app sends it to `POST /pair` (no auth) and gets `{token, user}`; the old token stops working. Each wrong code
-  counts against every live code (dead after 5); one client gets 10 wrong codes per 10 minutes. Revoke kills live codes.
+  driver app sends it to `POST /pair` (no auth) and gets `{token, user}`; the old token stops working. Wrong codes never
+  kill anyone's code: one client (IP address) gets 20 wrong codes per 10 minutes, and a success clears its count, so an
+  office pairing 15 drivers survives their typos; all clients together get 50 per 10 minutes, so at most 50 guesses
+  fall in a code's life (1 in 20,000). Past that, `/pair` answers 429 to everyone until the window passes and logs a
+  warning; an attacker can pause pairing this way but not take over a code (fallback: the admin's "Show token").
+  Revoke kills live codes.
 - One active mission per vehicle and per driver (409), enforced by partial unique indexes as well as the check.
   A mission with a driver needs a vehicle: give a vehicle alone (its paired driver is used) or a driver alone (his
   paired vehicle is used).
@@ -60,6 +67,10 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
 - Pings: the phone clock may be wrong. The server stores its receive time (minus the fix's age when `sent_at` is sent)
   and returns `clock_skew_s`. It rejects (0, 0), fixes older than 300 s, and jumps faster than 250 km/h beyond 1 km
   plus the reported `accuracy`. 1 ping/s per vehicle (DB-backed, holds across workers).
+- Pings between missions (free vehicles on the map): only with `on_shift: true` (the Android wrapper's shift mode),
+  only from the driver paired with the vehicle, only while the vehicle is in service and neither it nor he is on
+  another mission. The server keeps one position per 30 s and answers the rest 201 with `stored: false`. Unpaired,
+  off shift or signed out: nothing is kept. `GET /me` gives a driver `paired_vehicle_id`.
 - Creates (missions, drivers, users): 30 per minute per token.
 - Driver phone: `01XXXXXXXXX`, `8801...`, `+8801...`, Bangla digits, spaces and hyphens accepted; stored as
   `+8801XXXXXXXXX`; anything else is 422.

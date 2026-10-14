@@ -17,6 +17,7 @@ Status: run end to end on a laptop on 2026-10-14 (results below). Never run on a
 3. `docker compose up -d --build`. Order: `db` healthy, then `migrate` runs and exits 0, then `app` and `backup` start, then `caddy` once `app` is healthy.
 4. Create the first admin (the token is printed once): `docker compose run --rm app python -m app.bootstrap admin NAME`. Give the dispatch desk dispatch-only accounts (`bootstrap dispatcher NAME`, or `POST /users` as admin). A stolen token: `docker compose run --rm app python -m app.bootstrap revoke USER_ID`.
    - Optional SMS fallback to drivers: set `AMBULANCE_SMS_API_KEY` and `AMBULANCE_SMS_SENDER_ID` in `.env` (see `backend/README.md`), then `docker compose up -d`.
+   - Android driver app: set `AMBULANCE_ANDROID_CERT_SHA256` in `.env` to the release key's fingerprint (`docs/android-wrapper.md`), so the console's pairing QR opens the app instead of the browser.
 5. Open `https://DOMAIN/console/`; drivers use `https://DOMAIN/driver/`.
 6. Run the restore drill below once, now, and write down the date.
 

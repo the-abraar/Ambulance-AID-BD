@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private val asked = mutableSetOf<String>() // setup steps already offered in this launch
     private var setupOpen = false // a setup dialog or permission request is on screen
     private var pendingGeo: Pair<String, GeolocationPermissions.Callback>? = null
-    private var resumed = false
+    @Volatile private var resumed = false // read by the bridge on a WebView thread
     private var pendingStop: String? = null
     private val onStopped: (Int, String) -> Unit = { status, reason ->
         runOnUiThread { // reason is one of TrackingService's fixed words, safe to inline
@@ -43,9 +43,13 @@ class MainActivity : Activity() {
     // A page hidden for long can be frozen and lose the event (seen once on the emulator), so deliver it on screen.
     private fun flushStop() { pendingStop?.let { web.evaluateJavascript(it, null) }; pendingStop = null }
 
-    override fun onResume() { super.onResume(); resumed = true; flushStop() }
+    override fun onResume() {
+        super.onResume(); resumed = true; TrackingService.appOnScreen = true
+        TrackingService.cancelAlert(this) // the page shows the mission and alerts itself
+        flushStop()
+    }
 
-    override fun onPause() { resumed = false; super.onPause() }
+    override fun onPause() { resumed = false; TrackingService.appOnScreen = false; super.onPause() }
 
     @SuppressLint("SetJavaScriptEnabled") // the page is our own driver app; other origins open outside the WebView
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,9 +89,15 @@ class MainActivity : Activity() {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         }
         TrackingService.onStopped = onStopped
-        if (savedInstanceState == null) web.loadUrl(BuildConfig.BASE_URL) else web.restoreState(savedInstanceState)
+        if (savedInstanceState == null) web.loadUrl(link(intent) ?: BuildConfig.BASE_URL) else web.restoreState(savedInstanceState)
         nextSetupStep()
     }
+
+    // singleTask: a pairing QR scanned while the app runs arrives here; the page pairs on the #pair= hash change.
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); link(intent)?.let { web.loadUrl(it) } }
+
+    /** An App Link into the driver app on our own origin (the console's pairing QR), else null. */
+    private fun link(i: Intent?) = i?.dataString?.takeIf { sameOrigin(it) }
 
     override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); web.saveState(outState) }
 
@@ -108,9 +118,11 @@ class MainActivity : Activity() {
 
     /** JS interface. Methods run on a WebView binder thread. */
     inner class Bridge {
-        /** json = {baseUrl, token, vehicleId, missionId}. Replaces any running session. False if refused (see docs). */
+        /** json = {baseUrl, token, vehicleId, missionId, shift}. Replaces any running session. False if refused (see docs). */
         @JavascriptInterface
         fun startTracking(json: String): Boolean {
+            // Only from the visible app: a location service started in the background gets no fixes (Android 11-13).
+            if (!resumed) return false
             val o = runCatching { JSONObject(json) }.getOrNull() ?: return false
             val base = o.optString("baseUrl")
             val token = o.optString("token")
@@ -122,7 +134,7 @@ class MainActivity : Activity() {
                 return false
             }
             return try {
-                TrackingService.start(this@MainActivity, base, token, vehicle)
+                TrackingService.start(this@MainActivity, base, token, vehicle, o.optString("missionId"), o.optBoolean("shift"))
                 true
             } catch (e: Exception) { // Android 12+ refuses to start a foreground service while the app is in the background
                 false

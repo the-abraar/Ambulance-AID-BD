@@ -42,6 +42,13 @@ const short = (s) => (s ? s.slice(0, 8) : "-");
 const nameOf = (list, key, id, f) => { const x = list.find((i) => i[key] === id); return x ? f(x) : short(id); };
 const driverName = (id) => (id ? nameOf(drivers, "driver_id", id, (d) => d.name) : "-");
 const label = (s) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
+const dz = (v) => v ? v + (v.length === 16 ? ":00" : "") + "+06:00" : null; // datetime-local has no zone: labels say Dhaka time
+const BACKFILL = ["EN_ROUTE_PICKUP", "AT_SCENE", "TRANSPORTING_PATIENT", "AT_HOSPITAL"]; // the steps between dispatch and the end
+function backfillSteps(f) { // completed: every step (unknown time = null); cancelled: the steps up to the last one with a time
+  const at = BACKFILL.map((s) => dz(f["bf_" + s].value)), end = f.bf_end.value;
+  const n = end === "COMPLETED" ? at.length : at.reduce((k, x, i) => (x ? i + 1 : k), 0);
+  return [...BACKFILL.slice(0, n).map((status, i) => ({ status, at: at[i] })), { status: end, at: dz(f.bf_end_at.value) }];
+}
 
 // Dhaka is UTC+6 with no DST. sv-SE gives "2026-10-14 16:05:12"; never the browser's own zone.
 const DHAKA = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit",
@@ -95,7 +102,7 @@ function renderMap() {
 function renderVehicles() {
   fill($("vehicles").tBodies[0], vehicles.map((v) => {
     const p = v.last_position, state = !v.active ? "inactive" : v.busy ? "busy" : "free";
-    // Idle vehicles send no pings, so an old position is red only while the vehicle is on a mission.
+    // Free vehicles report only while their driver is on shift in the Android app, so an old position is red only on a mission.
     const pos = p ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${p.accuracy != null ? ` ±${Math.round(p.accuracy)} m` : ""} at ${dhaka(p.ts)}${p.stale ? " (STALE)" : ""}`
       : "no position yet";
     return h("tr", {}, td(v.registration), td(v.operator), td(state, { className: "st-" + state }), td(driverName(v.driver_id)),
@@ -104,7 +111,8 @@ function renderVehicles() {
   keep($("newm").elements.veh, [h("option", { value: "", textContent: "Pick a free vehicle" }),
     ...vehicles.filter((v) => v.active).map((v) => {
       const d = drivers.find((x) => x.driver_id === v.driver_id), why = v.busy ? "busy" : driverProblem(d);
-      return h("option", { value: v.vehicle_id, disabled: !!why, textContent: `${v.registration} · ${d ? d.name : "no driver"}${why ? ` (${why})` : ""}` });
+      // a back-fill is already over, so a busy vehicle or a since-revoked driver is fine
+      return h("option", { value: v.vehicle_id, disabled: !!why && !$("newm").elements.dispatched.value, textContent: `${v.registration} · ${d ? d.name : "no driver"}${why ? ` (${why})` : ""}` });
     })]);
   keep($("pairf").elements.veh, vehicles.filter((v) => v.active).map((v) => h("option", { value: v.vehicle_id, textContent: v.registration })));
   renderMap();
@@ -270,17 +278,17 @@ $("cancel-dlg").querySelector("form").onsubmit = (e) => {
 };
 $("behalf-dlg").querySelector("form").onsubmit = (e) => {
   if (!e.submitter || e.submitter.value !== "go") return;
-  const f = e.target.elements, at = f.at.value; // datetime-local has no zone: the label says Dhaka time
-  setStatus(behalf.m, behalf.next, { reason: f.reason.value.trim(),
-    ...(at ? { event_time: at + (at.length === 16 ? ":00" : "") + "+06:00" } : {}) });
+  const f = e.target.elements, at = dz(f.at.value);
+  setStatus(behalf.m, behalf.next, { reason: f.reason.value.trim(), ...(at ? { event_time: at } : {}) });
 };
+$("newm").elements.dispatched.oninput = renderVehicles; // back-fill unlocks busy vehicles in the list
 $("newm").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target.elements; // assigned_driver_id omitted: the server takes the vehicle's paired driver
-  const at = f.dispatched.value; // back-fill only; datetime-local has no zone: the label says Dhaka time
+  const at = dz(f.dispatched.value); // back-fill only: the whole paper-log mission in one request
   const body = { pickup_address: f.addr.value.trim(), assigned_vehicle_id: f.veh.value,
     ...(pickup ? { pickup_lat: pickup.lat, pickup_lng: pickup.lng } : {}),
-    ...(at ? { dispatched_at: at + (at.length === 16 ? ":00" : "") + "+06:00" } : {}) };
+    ...(at ? { dispatched_at: at, steps: backfillSteps(f) } : {}) };
   try { await api("POST", "/missions", body); e.target.reset(); setPickup(null); } catch (err) { /* toast shown */ }
   refresh();
 };

@@ -29,6 +29,18 @@ class PingQueueTest {
         assertEquals(3, q.size)
     }
 
+    @Test fun samplesOnceAMinuteBetweenMissions() {
+        val q = PingQueue()
+        q.free = true
+        assertEquals(PingQueue.FREE_GAP_MS, q.minGapMs) // TrackingService asks GPS for this rate too
+        assertTrue(q.offer(fix(0)))
+        assertFalse(q.offer(fix(30, lat = 23.9))) // moved far, but under a minute
+        assertTrue(q.offer(fix(60)))
+        q.free = false // a mission arrived: back to 5-10 s
+        assertTrue(q.offer(fix(70)))
+        assertEquals(PingQueue.MIN_GAP_MS, q.minGapMs)
+    }
+
     @Test fun keepsOrderAndDropsWhatTheServerCallsTooOld() {
         val q = PingQueue()
         q.offer(fix(0)); q.offer(fix(10)); q.offer(fix(20))
@@ -77,6 +89,11 @@ class PingQueueTest {
                 pingJson(f, t0 + 30_000), // sent 30 s after the fix: the server reads a 30 s age
             )
         } finally { Locale.setDefault(saved) }
+    }
+
+    @Test fun onShiftPingsSayTheyAre() {
+        val f = Fix(23.8103, 90.4125, 12.5f, 1_760_000_000_123L, t0)
+        assertTrue(pingJson(f, t0, onShift = true).endsWith(""","accuracy":12.5,"on_shift":true}"""))
     }
 
     @Test fun urls() {

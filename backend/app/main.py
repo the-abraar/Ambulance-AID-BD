@@ -30,15 +30,19 @@ PING_LIMIT_KEEP_S = 86400
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
 ACTIVE_SQL = f"status NOT IN ({','.join('?' * len(TERMINAL))})"  # bind *TERMINAL after it
 STALE_S = 120  # a position older than this is shown as stale (same as the console's STALE_MS)
+IDLE_PING_S = 30  # between missions a vehicle keeps at most one position per 30 s (the wrapper sends one a minute)
 RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission this long, so the driver sees why
-BACKFILL_WINDOW = timedelta(days=7)  # an on-behalf event_time may predate the mission: paper-log missions are entered after the outage
+BACKFILL_WINDOW = timedelta(days=7)  # how far back a paper-log back-fill or an on-behalf event_time may go
 PAIR_CODE_TTL = timedelta(minutes=10)
-PAIR_CODE_MAX_FAILS = 5  # bad /pair attempts a live code survives
-PAIR_CLIENT_FAILS, PAIR_CLIENT_WINDOW_S = 10, 600
+# Wrong /pair codes in a sliding 10-minute window. Per client, so one room's typos never block another (and a success
+# clears that client's count); globally, so at most 50 guesses fall in a code's 10-minute life: 1 in 20,000 for a
+# 6-digit code. A wrong code never kills anyone's live code.
+PAIR_WINDOW_S, PAIR_CLIENT_FAILS, PAIR_GLOBAL_FAILS = 600, 20, 50
 MAX_SPEED_MPS = 70  # 250 km/h: faster than any ambulance on Bangladesh roads
 JUMP_SLACK_M = 1000  # GPS and cell-fix noise on top of the reported accuracies
 JUMP_WINDOW_S = 600  # only compare with a recent fix, so one bad accepted fix cannot block real ones for long
 BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+ANDROID_PACKAGE = "bd.ambulanceaid.driver"  # android/app/build.gradle.kts applicationId
 
 
 def bd_phone(v: str) -> str:
@@ -69,6 +73,10 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     if retention_days < 1:
         raise RuntimeError("AMBULANCE_PING_RETENTION_DAYS must be at least 1")
     dev = os.environ.get("AMBULANCE_DEV") == "1"
+    # The Android app's signing-key SHA-256 (comma-separated), so the console's pairing QR opens the app (App Link).
+    android_certs = [c.strip().upper() for c in os.environ.get("AMBULANCE_ANDROID_CERT_SHA256", "").split(",") if c.strip()]
+    if not all(re.fullmatch(r"([0-9A-F]{2}:){31}[0-9A-F]{2}", c) for c in android_certs):
+        raise RuntimeError("AMBULANCE_ANDROID_CERT_SHA256 must be colon-separated SHA-256 fingerprints (AB:CD:...)")
 
     def prune():
         with closing(open_db(path)) as db:
@@ -171,18 +179,27 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     Phone = Annotated[str, StringConstraints(max_length=30), AfterValidator(bd_phone)]
 
+    class StepIn(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        status: State
+        at: AwareDatetime | None = None  # null: the paper log has no time for this step
+
     class MissionIn(BaseModel):
         pickup_address: Text
         assigned_vehicle_id: str | None = None
         assigned_driver_id: str | None = None  # omitted: taken from the vehicle's paired driver
         pickup_lat: float | None = Field(None, ge=-90, le=90)
         pickup_lng: float | None = Field(None, ge=-180, le=180)
-        dispatched_at: AwareDatetime | None = None  # paper-log back-fill: the real dispatch time; the driver is not alerted
+        # Paper-log back-fill: the real dispatch time and every later step, so the mission is recorded already over.
+        dispatched_at: AwareDatetime | None = None
+        steps: list[StepIn] | None = Field(None, min_length=1, max_length=len(State))
 
         @model_validator(mode="after")
         def both_or_neither(self):
             if (self.pickup_lat is None) != (self.pickup_lng is None):
                 raise ValueError("pickup_lat and pickup_lng must be given together")
+            if (self.dispatched_at is None) != (self.steps is None):
+                raise ValueError("dispatched_at and steps must be given together (paper-log back-fill)")
             return self
 
     class StatusIn(BaseModel):
@@ -197,6 +214,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         ts: AwareDatetime
         sent_at: AwareDatetime | None = None  # phone clock at send time; with ts it gives the fix's age, whatever the skew
         accuracy: float | None = Field(None, ge=0, le=100_000)
+        on_shift: bool = False  # the wrapper's shift mode: between missions the paired driver still reports the vehicle
 
     def out(row) -> dict:
         d = dict(row)
@@ -242,6 +260,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}
 
+    @app.get("/.well-known/assetlinks.json")
+    def assetlinks():
+        # No auth on purpose: Android fetches it to verify that the driver app may open this host's /driver/ links.
+        if not android_certs:
+            raise HTTPException(404, "not configured")
+        return [{"relation": ["delegate_permission/common.handle_all_urls"],
+                 "target": {"namespace": "android_app", "package_name": ANDROID_PACKAGE,
+                            "sha256_cert_fingerprints": android_certs}}]
+
     @app.post("/missions", status_code=201)
     def create_mission(body: MissionIn, bg: BackgroundTasks, u: dict = Depends(dispatcher_only),
                        db: Conn = Depends(get_db)):
@@ -258,26 +285,57 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             if not v:
                 raise HTTPException(422, "driver has no vehicle: pair one (PUT /vehicles/{id}/driver) or pass assigned_vehicle_id")
             vid = v["id"]
+        if body.steps:
+            return backfill(db, u, body, vid, did)
         if did:
             assignable(db, did)
         if db.execute(f"SELECT 1 FROM missions WHERE {ACTIVE_SQL} AND (assigned_vehicle_id=? OR assigned_driver_id=?)",
                       (*TERMINAL, vid, did)).fetchone():
             raise HTTPException(409, "vehicle or driver already has an active mission")
         mid, t = str(uuid.uuid4()), now()
-        at = body.dispatched_at and body.dispatched_at.astimezone(timezone.utc).isoformat(timespec="microseconds")
-        if at and not now(-BACKFILL_WINDOW) <= at <= t:
-            raise HTTPException(422, "dispatched_at must lie within the last 7 days and not in the future")
         try:  # the partial unique indexes (migration 0006) stop two dispatchers racing past the check above
             db.execute("INSERT INTO missions (id,status,pickup_address,assigned_vehicle_id,assigned_driver_id,created_at,"
                        "updated_at,pickup_lat,pickup_lng) VALUES (?,?,?,?,?,?,?,?,?)",
-                       (mid, INITIAL.value, body.pickup_address, vid, did, at or t, t, body.pickup_lat, body.pickup_lng))
+                       (mid, INITIAL.value, body.pickup_address, vid, did, t, t, body.pickup_lat, body.pickup_lng))
         except IntegrityError:
             db.rollback()
             raise HTTPException(409, "vehicle or driver already has an active mission")
-        audit(db, mid, u["id"], None, INITIAL.value, t, reason="back-fill" if at else None, event_time=at)
+        audit(db, mid, u["id"], None, INITIAL.value, t)
         db.commit()
-        if did and not at:  # a back-filled mission is already over: never page the driver for it
+        if did:
             bg.add_task(notify_driver, mid, "create")
+        return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
+
+    def backfill(db: Conn, u: dict, body: MissionIn, vid: str | None, did: str | None) -> dict:
+        # A paper-log mission is written in one go, already over: it is never active, so it needs no free vehicle, never
+        # alerts the driver (no SMS, no app alarm) and never raises the ack alarm. Each step is audited with its time.
+        t, utc = now(), lambda d: d and d.astimezone(timezone.utc).isoformat(timespec="microseconds")
+        state, prev, steps = INITIAL, utc(body.dispatched_at), []
+        if not now(-BACKFILL_WINDOW) <= prev <= t:
+            raise HTTPException(422, "dispatched_at must lie within the last 7 days and not in the future")
+        for st in body.steps:
+            try:
+                state = transition(state, st.status)
+            except InvalidTransition as e:
+                raise HTTPException(422, f"back-fill steps: {e}")
+            at = utc(st.at)
+            if at and not prev <= at <= t:  # step times only move forward, or response-time figures come out negative
+                raise HTTPException(422, "back-fill step times must not precede the previous step or lie in the future")
+            prev = at or prev
+            steps.append((state, at))
+        if state.value not in TERMINAL or not steps[-1][1]:
+            raise HTTPException(422, "back-fill steps must end in COMPLETED or CANCELLED, with its time")
+        mid, cols = str(uuid.uuid4()), "".join(f",{s.value.lower()}_at" for s, _ in steps)  # names from the State enum
+        db.execute(f"INSERT INTO missions (id,status,pickup_address,assigned_vehicle_id,assigned_driver_id,created_at,"
+                   f"updated_at,pickup_lat,pickup_lng{cols}) VALUES ({','.join('?' * (9 + len(steps)))})",
+                   (mid, state.value, body.pickup_address, vid, did, utc(body.dispatched_at), prev, body.pickup_lat,
+                    body.pickup_lng, *(a for _, a in steps)))
+        audit(db, mid, u["id"], None, INITIAL.value, t, reason="back-fill", event_time=utc(body.dispatched_at))
+        src = INITIAL
+        for s, a in steps:
+            audit(db, mid, u["id"], src.value, s.value, t, did if on_behalf(u["role"], s) else None, "back-fill", a)
+            src = s
+        db.commit()
         return out(db.execute("SELECT * FROM missions WHERE id=?", (mid,)).fetchone())
 
     @app.get("/missions")
@@ -309,6 +367,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             r["driver_id"] = u["driver_id"]
             m = current_row(db, u["driver_id"])
             r["vehicle_id"] = m["assigned_vehicle_id"] if m else None
+            v = db.execute("SELECT id FROM vehicles WHERE driver_id=? AND active", (u["driver_id"],)).fetchone()
+            r["paired_vehicle_id"] = v["id"] if v else None  # what an on-shift wrapper reports between missions
         return r
 
     def current_row(db: Conn, did: str, recent_s: float = 0):
@@ -504,9 +564,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.post("/vehicles/{vid}/pings", status_code=201)
     def ping(vid: str, body: PingIn, u: dict = Depends(driver_only), db: Conn = Depends(get_db)):
-        if not db.execute(f"SELECT 1 FROM missions WHERE assigned_driver_id=? AND assigned_vehicle_id=? AND {ACTIVE_SQL}",
-                          (u["driver_id"], vid, *TERMINAL)).fetchone():
-            raise HTTPException(403, "no active mission for this driver and vehicle")
+        mission = db.execute(f"SELECT 1 FROM missions WHERE assigned_driver_id=? AND assigned_vehicle_id=? AND {ACTIVE_SQL}",
+                             (u["driver_id"], vid, *TERMINAL)).fetchone()
+        # Between missions only the driver paired with an in-service, free vehicle reports it, and only on shift: never
+        # when unpaired, signed out or off shift (the consent draft promises this), and never two drivers for one vehicle.
+        if not mission and not (body.on_shift and db.execute(
+                f"SELECT 1 FROM vehicles v WHERE v.id=? AND v.driver_id=? AND v.active AND NOT EXISTS (SELECT 1 FROM "
+                f"missions m WHERE m.{ACTIVE_SQL} AND (m.assigned_vehicle_id=v.id OR m.assigned_driver_id=?))",
+                (vid, u["driver_id"], *TERMINAL, u["driver_id"])).fetchone()):
+            raise HTTPException(403, "no active mission for this driver and vehicle, and not on shift in it")
         # The phone clock may be wrong (manual time, dead RTC): store the server receive time, minus the fix's age when
         # the phone says how old it is (queued offline), and return the skew so the app can warn the driver.
         n = datetime.now(timezone.utc)
@@ -533,10 +599,13 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             except IntegrityError:
                 db.rollback()
                 raise HTTPException(429, "ping rate limit")
-        db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts,accuracy) VALUES (?,?,?,?,?)",
-                   (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds"), body.accuracy))
+        # Between missions keep one position per IDLE_PING_S and answer 201 anyway, so the phone moves on (no retries).
+        stored = bool(mission) or not last or (ts - datetime.fromisoformat(last["ts"])).total_seconds() >= IDLE_PING_S
+        if stored:
+            db.execute("INSERT INTO vehicle_pings (vehicle_id,lat,lng,ts,accuracy) VALUES (?,?,?,?,?)",
+                       (vid, body.lat, body.lng, ts.isoformat(timespec="microseconds"), body.accuracy))
         db.commit()
-        return {"ok": True, "clock_skew_s": round(((body.sent_at or body.ts) - n).total_seconds(), 1)}
+        return {"ok": True, "stored": stored, "clock_skew_s": round(((body.sent_at or body.ts) - n).total_seconds(), 1)}
 
     @app.get("/vehicles/{vid}/position")
     def position(vid: str, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
@@ -607,7 +676,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             code = f"{secrets.randbelow(10 ** 6):06d}"
             if not db.execute("SELECT 1 FROM pairing_codes WHERE code_hash=?", (hash_token(code),)).fetchone():
                 break
-        db.execute("INSERT INTO pairing_codes (user_id,code_hash,expires_at,failures) VALUES (?,?,?,0)",
+        db.execute("INSERT INTO pairing_codes (user_id,code_hash,expires_at) VALUES (?,?,?)",  # `failures` is unused
                    (uid, hash_token(code), exp))
         auth_audit(db, u["id"], uid, "pairing_code")
         db.commit()
@@ -615,21 +684,24 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.post("/pair")
     def pair(body: PairIn, request: Request, db: Conn = Depends(get_db)):
-        # No auth on purpose: the one-time code is the credential. Guessing is capped twice: per client (failures in
-        # the window) and per code (every bad attempt counts against every live code, which dies after 5).
+        # No auth on purpose: the one-time code is the credential. Guessing is capped per client and globally (above).
         client = f"pair:{request.client.host if request.client else '-'}"
-        if rate_over(db, client, PAIR_CLIENT_FAILS, PAIR_CLIENT_WINDOW_S):
-            raise HTTPException(429, "too many wrong codes, wait 10 minutes")
+        if rate_over(db, client, PAIR_CLIENT_FAILS, PAIR_WINDOW_S):
+            raise HTTPException(429, "too many wrong codes from here, wait 10 minutes")
+        if rate_over(db, "pair-all", PAIR_GLOBAL_FAILS, PAIR_WINDOW_S):
+            raise HTTPException(429, "too many wrong codes, pairing paused for up to 10 minutes")
         t, h = now(), hash_token(body.code)
-        row = db.execute("SELECT user_id FROM pairing_codes WHERE code_hash=? AND expires_at>? AND failures<?",
-                         (h, t, PAIR_CODE_MAX_FAILS)).fetchone()
+        row = db.execute("SELECT user_id FROM pairing_codes WHERE code_hash=? AND expires_at>?", (h, t)).fetchone()
         # shortcut: unsalted sha256 of a 6-digit code is reversible from a DB dump; fine while codes live 10 minutes.
         if not row or db.execute("DELETE FROM pairing_codes WHERE code_hash=?", (h,)).rowcount != 1:
             db.rollback()
-            db.execute("UPDATE pairing_codes SET failures=failures+1 WHERE expires_at>?", (t,))
             rate_hit(db, client)
+            rate_hit(db, "pair-all")
             db.commit()
+            if rate_over(db, "pair-all", PAIR_GLOBAL_FAILS, PAIR_WINDOW_S):
+                logging.warning("pairing paused: %d wrong codes in 10 minutes from all clients", PAIR_GLOBAL_FAILS)
             raise HTTPException(401, "invalid or expired code")
+        db.execute("DELETE FROM rate_events WHERE bucket=?", (client,))  # committed with the token below
         tok = new_token(db, row["user_id"], row["user_id"], reenable=True, action="pair")  # commits the DELETE too
         u = db.execute("SELECT u.id, u.name, u.role, d.id AS driver_id FROM users u JOIN drivers d ON d.user_id=u.id "
                        "WHERE u.id=?", (row["user_id"],)).fetchone()
