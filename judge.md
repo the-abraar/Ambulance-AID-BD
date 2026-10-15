@@ -324,3 +324,13 @@ Checked: last commit is `5e9dee4` (2026-10-13); the only untracked files are `.D
 
 Done (agent-made; `scripts/check.sh` exit 0, 109 passed, SQLite only, Postgres not re-run): `GET /missions` takes `limit` (default 200, max 500) and `offset`; a ping's `ts` is clamped to server receive time; vehicle creation writes `create_vehicle` to `auth_audit`; `ping_limit` rows older than 24 h are pruned at startup; Caddy body limit 64 KB plus an app 413 check.
 **Not covered:** the 413 check misses chunked bodies (Caddy only); pruning runs at startup only. Score unchanged at 18%; gaps 1, 5, 7 and 9 are untouched.
+
+### Update 14 (2026-10-15, agent round)
+
+Edited at the owner's request for a status update. Agent-made, pushed in `bc3d0c7`; not reviewed by a human.
+- **Docker:** current `main` (`eea84a7`, and again with `bc3d0c7`'s change) starts under Docker Compose: `migrate` exit 0, `app` healthy, `/healthz` through Caddy 200 `{"ok":true}`, then `down -v`. The TODO item is ticked.
+- **Chunked bodies (Update 13 gap closed):** the app now counts body bytes as it reads them, so a chunked body over 64 KB with no Content-Length gets 413. Tested in pytest and against uvicorn in the container.
+- **Pruning (Update 13 gap closed):** a daily background prune already existed besides the startup one; its interval is now `PRUNE_EVERY_S` and a test shows it pruning while the app runs.
+- **Checks:** `scripts/check.sh` exit 0 (180 passed, 1 skipped, both orders, SQLite); pytest on Postgres 16 (throwaway container) 181 passed.
+
+**Still open:** gaps 1, 5, 7 and 9; no pilot operator, real phone or GPS, real host, human review of auth code, or counsel review. Score unchanged at 18%.
