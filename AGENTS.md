@@ -10,4 +10,4 @@
 - API contract: when changing endpoints, edit `docs/api-spec/openapi.yaml`; `backend/tests/test_spec.py` and the check validate it.
 - Mission rules: read `backend/app/state_machine.py` when touching statuses or roles.
 - Android wrapper (`android/`, Kotlin, no runtime deps): read `docs/android-wrapper.md` before changing it or the driver app's `AmbulanceNative` bridge. Unit tests: `cd android && ./gradlew testDebugUnitTest`.
-- Judgement rules for review: `CODING_STANDARDS.md`. Project status and known gaps: `judge.md` (do not edit).
+- Judgement rules for review: `CODING_STANDARDS.md`. Project status and known gaps: `judge.md` (do not edit). Owner to-do: `TODO.md`.
