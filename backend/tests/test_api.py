@@ -214,3 +214,29 @@ def test_vehicle_create_audited_and_prune_and_body_cap(env):
     assert db.execute("SELECT COUNT(*) FROM ping_limit WHERE vehicle_id='old'").fetchone()[0] == 0
     r = c.post("/missions", content=b"x" * 70000, headers={**env["D"], "content-type": "application/json"})
     assert r.status_code == 413
+
+
+def test_body_cap_counts_chunked_bodies(env):
+    # A generator body goes out chunked with no Content-Length; the cap must count bytes as they are read.
+    r = env["c"].post("/missions", content=(b"x" * 1024 for _ in range(70)),
+                      headers={**env["D"], "content-type": "application/json"})
+    assert r.status_code == 413 and "content-length" not in r.request.headers
+    assert mk(env)  # a normal body still goes through
+
+
+def test_prune_runs_periodically(env, monkeypatch):
+    import time
+
+    import app.main as main
+    monkeypatch.setattr(main, "PRUNE_EVERY_S", 0.05)
+    db = env["db"]
+    with TestClient(create_app(env["path"])):  # the periodic task lives as long as the app (lifespan)
+        db.execute("INSERT INTO ping_limit (vehicle_id,last_at) VALUES ('old', 1.0)")
+        db.commit()
+        for _ in range(100):
+            time.sleep(0.05)
+            db.rollback()  # end this connection's snapshot so it sees the prune's commit
+            if not db.execute("SELECT COUNT(*) FROM ping_limit WHERE vehicle_id='old'").fetchone()[0]:
+                break
+        else:
+            raise AssertionError("ping_limit was not pruned while the app ran")

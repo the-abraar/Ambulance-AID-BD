@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Qu
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 from typing import Annotated
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -27,6 +28,7 @@ from .state_machine import INITIAL, TRANSITIONS, InvalidTransition, State, on_be
 
 MAX_BODY = 64 * 1024  # keep equal to request_body max_size in Caddyfile
 PING_LIMIT_KEEP_S = 86400
+PRUNE_EVERY_S = 86400  # besides the prune at startup, so a server that runs for months keeps these tables small
 TERMINAL = [s.value for s in State if not TRANSITIONS[s]]
 ACTIVE_SQL = f"status NOT IN ({','.join('?' * len(TERMINAL))})"  # bind *TERMINAL after it
 STALE_S = 120  # a position older than this is shown as stale (same as the console's STALE_MS)
@@ -66,6 +68,30 @@ def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 12_742_000 * math.asin(math.sqrt(a))  # haversine, Earth diameter in metres
 
 
+class BodyCap:
+    """413 for a body over MAX_BODY: by Content-Length up front, and by counting while it is read (chunked bodies)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        if int(Headers(scope=scope).get("content-length") or 0) > MAX_BODY:
+            return await JSONResponse({"detail": "request body too large"}, status_code=413)(scope, receive, send)
+        seen = 0
+
+        async def capped():
+            nonlocal seen
+            msg = await receive()
+            seen += len(msg.get("body", b""))
+            if seen > MAX_BODY:  # raised inside the route's body read; FastAPI re-raises HTTPException as the response
+                raise HTTPException(413, "request body too large")
+            return msg
+
+        await self.app(scope, capped, send)
+
+
 def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min_interval_s: float = 1.0,
                create_per_min: int = 30) -> FastAPI:
     path = db_path or db_target()
@@ -90,7 +116,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     async def lifespan(_):
         async def daily():
             while True:
-                await asyncio.sleep(86400)
+                await asyncio.sleep(PRUNE_EVERY_S)
                 try:
                     await asyncio.to_thread(prune)
                 except Exception:  # a DB blip must not stop tomorrow's prune
@@ -106,12 +132,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     migrate(path)
     prune()
 
-    @app.middleware("http")
-    async def body_cap(request: Request, call_next):
-        # Caddy enforces the real cap (also for chunked bodies); this rejects honest oversize requests when run without it.
-        if int(request.headers.get("content-length") or 0) > MAX_BODY:
-            return JSONResponse({"detail": "request body too large"}, status_code=413)
-        return await call_next(request)
+    app.add_middleware(BodyCap)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_, exc: RequestValidationError):

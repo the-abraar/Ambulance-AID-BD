@@ -98,6 +98,8 @@ Second run, same day:
 
 The first run used a backend from before amb-api's round, with a stand-in `/healthz` and a `pip freeze` lock, in a scratch copy only. The second run replaces it.
 
+Third run, 2026-10-15: `main` at `eea84a7`, then with the chunked-body cap. The image built, `migrate` exited 0, `app` turned healthy, and `/healthz` through Caddy returned 200 `{"ok":true}`. A 70 KB chunked POST sent straight to the app (no Content-Length, past Caddy) returned 413. `docker compose down -v` cleaned up.
+
 Not checked:
 - a real host, DNS, or a Let's Encrypt certificate
 - the 20:00 UTC timer firing
