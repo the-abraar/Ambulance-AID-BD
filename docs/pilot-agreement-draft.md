@@ -57,6 +57,7 @@ Further terms:
 - Sub-processors:
   - the hosting provider **[TODO]**;
   - the SMS gateway (BulkSMSBD), only if SMS fallback is switched on;
+  - the OpenStreetMap Foundation: the dispatcher's browser loads map tiles from it, and the console's landmark search sends what the dispatcher types (often the pickup location) to its public Nominatim service. For a real fleet, self-host Nominatim or use a paid geocoder **[OWNER TODO]**;
   - offsite backup storage **[TODO]**.
 - Security: per-user hashed tokens, admin and dispatcher roles, HTTPS, an append-only database role for the audit tables, and nightly backups. No independent security review has been done; say so.
 - At the end of the pilot the provider returns the data to the operator **[format: TODO]**, then deletes it, including backups within 14 days, unless the operator asks otherwise in writing.

@@ -224,8 +224,9 @@ def test_driver_phone_api(env):
     did = r.json()["driver_id"]
     assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=env["P"]).status_code == 403
     assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=D).json()["phone"] == "+8801911234567"
-    audit = env["db"].execute("SELECT * FROM auth_audit WHERE action LIKE 'update_phone%'").fetchone()
-    assert audit is not None
+    # Bound parameter, not a literal: psycopg reads a bare % in the SQL as a placeholder.
+    audit = env["db"].execute("SELECT action FROM auth_audit WHERE action LIKE ?", ("update_phone%",)).fetchall()
+    assert [a["action"] for a in audit] == ["update_phone:***567->***567"]  # last 3 digits only, never the numbers
     assert c.patch(f"/drivers/{did}", json={"phone": "abc"}, headers=D).status_code == 422
     assert c.patch(f"/drivers/{did}", json={"phone": None}, headers=D).json()["phone"] is None
     assert c.patch("/drivers/nope", json={"phone": None}, headers=D).status_code == 404
@@ -308,13 +309,26 @@ def test_response_times_report(env):
     from tests.test_oct15 import FULL, backfill
     c, D, V = env["c"], env["D"], env["V"]
     assert c.get("/reports/response-times", headers=V).status_code == 403
-    assert backfill(env, FULL).status_code == 201  # dispatched -3 h, en route -2.9, scene -2.7, hospital -2.2, done -2
+    r = backfill(env, FULL)  # dispatched -3 h, en route -2.9, scene -2.7, hospital -2.2, done -2
+    assert r.status_code == 201
     s = c.get("/reports/response-times", headers=D).json()["summary"]
     assert s["total_missions"] == 1
     assert s["dispatch_to_ack_s"]["median"] == 360.0
     assert s["ack_to_scene_m"]["median"] == 12.0
     assert s["scene_to_hospital_m"]["median"] == 30.0
     assert s["total_turnaround_m"]["median"] == 60.0
+    day = r.json()["created_at"][:10]
+    assert c.get(f"/reports/response-times?end_date={day}", headers=D).json()["summary"]["total_missions"] == 1
+    assert c.get(f"/reports/response-times?start_date={day}&end_date={day}",
+                 headers=D).json()["summary"]["total_missions"] == 1  # end_date includes its whole day
+    assert c.get("/reports/response-times?end_date=2000-01-01", headers=D).json()["summary"]["total_missions"] == 0
+    assert c.get("/reports/response-times?end_date=yesterday", headers=D).status_code == 422
+    assert backfill(env, [("CANCELLED", -2.5)]).status_code == 201
+    bad = backfill(env, FULL).json()["mission_id"]
+    env["db"].execute("UPDATE missions SET completed_at='2000-01-01T00:00:00+00:00' WHERE id=?", (bad,)); env["db"].commit()
+    s = c.get("/reports/response-times", headers=D).json()["summary"]
+    assert s["total_missions"] == 2  # the cancelled mission is left out
+    assert s["total_turnaround_m"]["count"] == 1  # completed before it was created: dropped, not negative
     csv_res = c.get("/reports/response-times?format=csv", headers=D)
     assert csv_res.status_code == 200 and csv_res.headers["content-type"].startswith("text/csv")
     assert "Registration" in csv_res.text.splitlines()[0]

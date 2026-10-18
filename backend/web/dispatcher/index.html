@@ -23,9 +23,12 @@
   <section id="dispatch">
     <div>
       <div class="map-search">
-        <input id="map-search-input" placeholder="Search Dhaka landmark or area (e.g. Dhanmondi, DMCH)" aria-label="Search map location">
+        <input id="map-search-input" placeholder="Search Dhaka landmark or area (e.g. Dhanmondi, DMCH)" aria-label="Search map location"
+          aria-describedby="search-warn">
         <button type="button" id="map-search-btn">Find on map</button>
       </div>
+      <p id="search-warn" class="warn">Search text goes to OpenStreetMap's public Nominatim service. Type a landmark or area only, never patient details.</p>
+      <ul id="map-search-results" aria-label="Search results: pick one to set the pickup point" hidden></ul>
       <div id="map" role="application" aria-label="Map of Dhaka. Click to place the pickup point; arrow keys pan."></div>
     </div>
     <form id="newm">

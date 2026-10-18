@@ -187,6 +187,22 @@ def run(base, dtok, ctok):
         wait(con, "[...document.querySelectorAll('#map img.leaflet-tile')].some(i=>i.complete&&i.naturalWidth>0)")
         ok("OpenStreetMap" in con.inner_text(".leaflet-control-attribution"), "map loads tiles and shows the OSM attribution")
         ok("No patient names or phone numbers" in con.inner_text("#addr-warn"), "address field warns against patient data")
+        ok("Nominatim" in con.inner_text("#search-warn"), "landmark search says its text goes to Nominatim")
+        hits = [{"lat": "23.7461", "lon": "90.3742", "display_name": "Dhanmondi 27, Dhaka"},
+                {"lat": "23.7104", "lon": "90.4074", "display_name": "Dhanmondi, Old Dhaka"}]
+        con.route("https://nominatim.openstreetmap.org/**",
+                  lambda r: r.fulfill(json=hits, headers={"Access-Control-Allow-Origin": "*"}))
+        con.fill("#map-search-input", "Dhanmondi"); con.press("#map-search-input", "Enter")
+        con.wait_for_selector("#map-search-results button")
+        ok(con.eval_on_selector_all("#map-search-results button", "b=>b.map(x=>x.textContent)") == [x["display_name"] for x in hits]
+           and con.evaluate("document.activeElement.textContent") == hits[0]["display_name"]
+           and con.inner_text("#pickup") == "not set, click the map",
+           "landmark search lists every match, focuses the first and leaves the pickup unset")
+        con.keyboard.press("Tab"); con.keyboard.press("Enter")
+        wait(con, "document.getElementById('map-search-results').hidden")
+        ok(con.inner_text("#pickup") == "23.7104, 90.4074" and con.evaluate("document.activeElement.id") == "map-search-input",
+           "picking the second match by keyboard sets the pickup there and returns focus to the search box")
+        con.evaluate("map.setView(DHAKA_CENTRE, 12)")  # back to the start view: later checks need the vehicles on screen
 
         con.fill("#newv [name=operator]", "RedCrescent"); con.fill("#newv [name=registration]", "DHK-E2E")
         con.click("#newv button")

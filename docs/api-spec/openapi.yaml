@@ -415,13 +415,13 @@ paths:
       operationId: getResponseTimesReport
       security: [{BearerAuth: []}]
       parameters:
-        - {name: start_date, in: query, required: false, schema: {type: string}}
-        - {name: end_date, in: query, required: false, schema: {type: string}}
+        - {name: start_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, UTC day, inclusive'}
+        - {name: end_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, UTC day, inclusive'}
         - {name: vehicle_id, in: query, required: false, schema: {type: string}}
         - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
       responses:
         '200':
-          description: Response times metrics or streaming CSV.
+          description: Response times metrics or streaming CSV. Cancelled missions are left out.
           content:
             application/json:
               schema:

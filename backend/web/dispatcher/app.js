@@ -315,18 +315,28 @@ $("newd").onsubmit = async (e) => {
   } catch (err) { /* toast shown */ }
   refresh();
 };
+// Many Dhaka names are ambiguous and the top match can be the wrong place: the map pans to it, but the pickup
+// moves only when the dispatcher picks a result from the list.
 $("map-search-btn").onclick = async () => {
-  const q = $("map-search-input").value.trim();
+  const q = $("map-search-input").value.trim(), list = $("map-search-results");
+  list.replaceChildren(); list.hidden = true;
   if (!q) return;
   try {
     const url = "https://nominatim.openstreetmap.org/search?format=json&q=" + enc(q + ", Dhaka, Bangladesh") + "&countrycodes=bd&limit=5";
     const r = await fetch(url, { headers: { "Accept-Language": "en" } });
     const data = await r.json();
     if (!data || !data.length) { toast("No location found for: " + q); return; }
-    const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
-    map.setView([lat, lng], 15);
-    setPickup({ lat, lng });
-    toast("Map moved to: " + (data[0].display_name.split(",")[0] || q));
+    map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 15);
+    list.append(...data.map((d) => h("li", {}, btn(d.display_name, () => {
+      const lat = parseFloat(d.lat), lng = parseFloat(d.lon);
+      map.setView([lat, lng], 15);
+      setPickup({ lat, lng });
+      list.replaceChildren(); list.hidden = true;
+      $("map-search-input").focus(); // the clicked button is gone; keep keyboard focus in the search area
+      toast("Pickup set: " + d.display_name);
+    }))));
+    list.hidden = false;
+    list.querySelector("button").focus();
   } catch (err) { toast("Search error: " + err.message); }
 };
 $("map-search-input").onkeydown = (e) => {

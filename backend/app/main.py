@@ -7,7 +7,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager, closing
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from pathlib import Path
 
@@ -518,7 +518,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         row = db.execute("SELECT phone FROM drivers WHERE id=?", (did,)).fetchone()
         old_phone = row["phone"] if row else None
         db.execute("UPDATE drivers SET phone=? WHERE id=?", (body.phone, did))
-        auth_audit(db, u["id"], uid, f"update_phone:{old_phone}->{body.phone}")
+        tail = lambda p: f"***{p[-3:]}" if p else "none"  # auth_audit is never pruned: keep only the last 3 digits
+        auth_audit(db, u["id"], uid, f"update_phone:{tail(old_phone)}->{tail(body.phone)}")
         db.commit()
         return drivers(db, did)[0]
 
@@ -737,19 +738,20 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                                                 "driver_id": u["driver_id"], "token_expires_at": tok["expires_at"]}}
 
     @app.get("/reports/response-times")
-    def response_time_report(start_date: str | None = None, end_date: str | None = None,
+    def response_time_report(start_date: date | None = None, end_date: date | None = None,
                              vehicle_id: str | None = None, format: str = "json",
                              u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         sql = ("SELECT m.id, m.status, m.assigned_vehicle_id, v.registration, v.operator, m.created_at, "
                "m.acknowledged_at, m.en_route_pickup_at, m.at_scene_at, m.at_hospital_at, m.completed_at "
-               "FROM missions m LEFT JOIN vehicles v ON v.id=m.assigned_vehicle_id WHERE 1=1")
-        params = []
+               "FROM missions m LEFT JOIN vehicles v ON v.id=m.assigned_vehicle_id WHERE m.status <> ?")
+        params = [State.CANCELLED.value]  # a cancelled mission has no response to time
+        # created_at is ISO text in UTC; end_date includes its whole (UTC) day, so compare against the next day.
         if start_date:
             sql += " AND m.created_at >= ?"
-            params.append(start_date)
+            params.append(start_date.isoformat())
         if end_date:
-            sql += " AND m.created_at <= ?"
-            params.append(end_date)
+            sql += " AND m.created_at < ?"
+            params.append((end_date + timedelta(days=1)).isoformat())
         if vehicle_id:
             sql += " AND m.assigned_vehicle_id = ?"
             params.append(vehicle_id)
@@ -794,7 +796,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             ack_s = (t_ack - t_created).total_seconds() if t_ack and t_created and t_ack >= t_created else None
             scene_m = (t_scene - t_ack).total_seconds() / 60.0 if t_scene and t_ack and t_scene >= t_ack else None
             hosp_m = (t_hosp - t_scene).total_seconds() / 60.0 if t_hosp and t_scene and t_hosp >= t_scene else None
-            total_m = ((t_comp or t_hosp) - t_created).total_seconds() / 60.0 if (t_comp or t_hosp) and t_created else None
+            t_end = t_comp or t_hosp
+            total_m = (t_end - t_created).total_seconds() / 60.0 if t_end and t_created and t_end >= t_created else None
 
             if ack_s is not None:
                 all_ack_s.append(ack_s)
