@@ -1,6 +1,6 @@
 # Launch-Readiness Judgement: Ambulance-AID-BD
 
-> **Current go-to-market score: 18%.** The verdict below is the original 2026-10-12 audit. See *Update 8* at the bottom for the current score, gaps and next steps, and `../GO_TO_MARKET_SCORECARD.md`.
+> **Current go-to-market score: 16%** (the cap in `../GO_TO_MARKET_SCORECARD.md` since the 2026-10-15 re-critique; unchanged on 2026-10-19). The verdict below is the original 2026-10-12 audit. See *Update (2026-10-19, review round)* at the bottom for the current gaps and next steps; *Update 8* explains the scoring.
 
 Audited: 2026-10-12, single commit `5360cf1` ("docs: initial architecture..."). Files read: `README.md`, `LICENSE`, `docs/roadmap.md`, `docs/security-and-anti-abuse.md`, `docs/architecture/*.md` (4 files), `docs/api-spec/openapi.yaml`. Total ~1,045 lines, all prose plus one API spec.
 
@@ -143,35 +143,35 @@ Audited: 2026-10-12, single commit `5360cf1` ("docs: initial architecture..."). 
 
 ## Major gaps
 
-- **Spec drift on the state machine.** Four different state vocabularies:
+- **Spec drift on the state machine.** *(2026-10-19: resolved. `backend/app/state_machine.py` is the one enum; the architecture doc maps the old names to it.)* Four different state vocabularies:
   - `README.md:81-84`: `DISPATCHED_TO_PATIENT`, `PATIENT_ONBOARD`, `MISSION_COMPLETED`.
   - `dispatch-and-citizen-platform.md:74-81`: `EN_ROUTE_PICKUP`, `TRANSPORTING_PATIENT`, `DECONTAMINATION`.
   - `openapi.yaml:256-263`: adds `COMPLETED` and `CANCELLED` and omits `AVAILABLE` and `DECONTAMINATION`.
   - `security-and-anti-abuse.md:44` uses the README names.
 
   Fix: make one enum in the spec the source of truth and generate the docs and code from it.
-- **API incompleteness.** Missing:
+- **API incompleteness.** *(2026-10-19: partly closed. Token auth with pairing codes, driver shift mode, cancel and `limit`/`offset` paging exist; idempotency keys, fare and payment, hospital endpoints and push updates (it polls) are still missing. Citizen OTP is out of scope for the wedge.)* Missing:
   - auth/OTP flows; driver login and shift; vehicle registration and certification; hospital endpoints;
   - mission cancel or reassign; fare and payment;
   - error schemas, pagination, idempotency keys, rate limits;
   - websocket or push for live tracking.
 
   `/missions` POST has no 4xx responses (`openapi.yaml:53-59`).
-- **Public location exposure.** `/ambulances/available` (`openapi.yaml:126-164`) has no auth and returns `vehicle_id` with distance. Brokers or syndicates can scrape and triangulate the whole fleet in real time. Fix: return coarse ETA only, add rate limits, require OTP for booking, and never expose stable IDs publicly.
-- **No offline or degraded mode.** Dispatch, the driver app and the console all assume continuous 4G. There is no SMS or USSD fallback, no voice-dispatch fallback, no defined cloud-outage behaviour for active missions, and no SLA or RTO/RPO (recovery time and recovery point objectives).
+- **Public location exposure.** *(2026-10-19: resolved for the wedge. The endpoint no longer exists; positions are shown only to signed-in dispatchers.)* `/ambulances/available` (`openapi.yaml:126-164`) has no auth and returns `vehicle_id` with distance. Brokers or syndicates can scrape and triangulate the whole fleet in real time. Fix: return coarse ETA only, add rate limits, require OTP for booking, and never expose stable IDs publicly.
+- **No offline or degraded mode.** *(2026-10-19: partly closed. Optional SMS fallback (BulkSMSBD), queued position replay in the driver app, and a draft `docs/runbook-downtime.md` nobody has rehearsed. Status changes still cannot be queued offline, and there is no SLA or RTO/RPO.)* Dispatch, the driver app and the console all assume continuous 4G. There is no SMS or USSD fallback, no voice-dispatch fallback, no defined cloud-outage behaviour for active missions, and no SLA or RTO/RPO (recovery time and recovery point objectives).
 - **No operations model.** There is no 24/7 NOC (network operations centre), on-call rota, incident runbook, monitoring or alerting, or support channel for drivers and dispatchers. A 999-adjacent system needs all of these before go-live.
 - **Hardware supply chain undefined.** There is no device vendor or model, no BTRC (telecom regulator) type approval, no installer network, no tamper-seal process and no RMA (returns and repairs) process. The siren current sensor (`roadmap.md:34`) needs per-vehicle-model wiring work.
-- **Localization and accessibility.** All UI concepts are in English. Citizens in an emergency need full Bangla, voice/IVR (interactive voice response) for low-literacy callers, and a low-end Android target.
+- **Localization and accessibility.** *(2026-10-19: partly closed. The driver app is in Bangla; the dispatcher console is English only.)* All UI concepts are in English. Citizens in an emergency need full Bangla, voice/IVR (interactive voice response) for low-literacy callers, and a low-end Android target.
 - **Driver incentives ignored.** Syndicates control demand at hospital gates (`bangladesh-context-and-challenges.md:46`). The docs offer no reason drivers would accept platform-set fares beyond a hoped-for mandate. This needs field validation.
 - **Roadmap unrealistic.** Hardware for 200 government vehicles starts 2026-11 (`roadmap.md:9`) with no procurement process, funding or MoU. Government procurement alone typically exceeds the 4 months allotted.
-- **License wording.** `README.md:119` says "Apache 2.0 / MIT"; `LICENSE` is Apache 2.0. Pick one. Also decide whether a public repo with security details of the signal-control design is appropriate.
+- **License wording.** *(2026-10-19: resolved. README and LICENSE both say Apache 2.0.)* `README.md:119` says "Apache 2.0 / MIT"; `LICENSE` is Apache 2.0. Pick one. Also decide whether a public repo with security details of the signal-control design is appropriate.
 
 ---
 
 ## Launch path (ordered)
 
 1. **Discovery (weeks 0-6):** 20+ interviews (drivers, fleet owners, hospital ER, 999, DMP). Sign one fleet pilot LOI. Do the junction-ownership and controller survey for one corridor. Get a legal opinion. *Exit: one signed pilot partner, plus a factual answer on whether controllable signals exist.*
-2. **Fix the spec (weeks 2-6, in parallel):**
+2. **Fix the spec (weeks 2-6, in parallel):** *(2026-10-19: done for the MVP spec in `docs/api-spec/openapi.yaml`; mTLS is moot without signals.)*
    - one state enum;
    - authz matrix;
    - remove public preemption endpoints;
@@ -179,7 +179,7 @@ Audited: 2026-10-12, single commit `5360cf1` ("docs: initial architecture..."). 
    - non-guessable IDs;
    - full error and auth flows;
    - source every claim or label it an estimate.
-3. **Wedge MVP (months 2-4):** For one private or NGO fleet, about 20-50 vehicles: driver Android app (GPS, mission states, Bangla UI), dispatcher web console, Postgres + PostGIS backend, state machine with tests, CI/CD, staging and prod, monitoring, and a backup/restore drill. No signals and no citizen app.
+3. **Wedge MVP (months 2-4):** For one private or NGO fleet, about 20-50 vehicles: driver Android app (GPS, mission states, Bangla UI), dispatcher web console, Postgres + PostGIS backend, state machine with tests, CI/CD, staging and prod, monitoring, and a backup/restore drill. No signals and no citizen app. *(2026-10-19: built in code ahead of step 1: Postgres without PostGIS, CI, a Bangla driver web app plus an Android wrapper, the console and a response-time report. Not done: staging and prod hosting, monitoring, a rehearsed restore, and step 1 itself.)*
 4. **Pilot and baseline (months 4-6):** Run live with the partner. Measure response times, utilisation and junction wait times. Charge a per-vehicle fee to test willingness to pay. Publish the baseline dataset.
 5. **Compliance and ops hardening (months 5-7):** data-protection policy, retention, pentest, 24/7 on-call, incident runbooks, offline/SMS fallback.
 6. **Expand fleets, then citizen booking (months 7-12):** add 2-3 more fleets. Launch citizen booking in one zone with OTP and mobile-money payment, with no preemption rights attached.
@@ -334,3 +334,48 @@ Edited at the owner's request for a status update. Agent-made, pushed in `bc3d0c
 - **Checks:** `scripts/check.sh` exit 0 (180 passed, 1 skipped, both orders, SQLite); pytest on Postgres 16 (throwaway container) 181 passed.
 
 **Still open:** gaps 1, 5, 7 and 9; no pilot operator, real phone or GPS, real host, human review of auth code, or counsel review. Score unchanged at 18%.
+
+## Update (2026-10-19, review round)
+
+Re-review of `ba8c2c8` against the 2026-10-18 review (at `440dbb8`) and its re-score (at `176744f`). Edited at the reviewer's request. I read the code, not the commit messages. I did not run the tests or the browser e2e myself; GitHub CI on `ba8c2c8` is green (SQLite both orders, and 182 passed on Postgres).
+
+**Score:** 16% (cap 16), unchanged. Dimension scores unchanged: Product 4, Quality 5, Security 6, Legal 2, Market 1, Ops 3, Honesty 6. The new commit fixes real bugs, but nothing in it moves the cap: no operator, no real phone or full shift, no host, no human review, no counsel.
+
+### Verified fixed (in code)
+
+- **CI was red** (a literal `%` in a test's LIKE): fixed, the pattern is a bound parameter (`backend/tests/test_dispatch_loop.py:227-229`), and CI is green again.
+- **Landmark search moved the pickup to the first match without asking:** fixed. The map pans to the first match, but the pickup moves only when the dispatcher picks a result (`backend/web/dispatcher/app.js:320-342`). The browser e2e covers it with a faked Nominatim; the e2e is not in CI.
+- **Phone numbers in plain text in `auth_audit`:** fixed, only the last 3 digits are kept (`backend/app/main.py:521-522`). See bug 2.
+- **Search text goes to a third party:** partly. The console now warns under the search box, and the pilot agreement draft lists the OpenStreetMap Foundation as a sub-processor. It still uses the public Nominatim.
+- **Report edge cases:** partly. Dates are typed (bad input gets 422), `end_date` now includes its whole day, cancelled missions are left out, and negative turnarounds are dropped (`backend/app/main.py:741-757, 799-800`). But "day" means a UTC day (bug 1).
+- **Still open:** never hosted, never run on a real phone or for a full shift (`README.md:18-19`); the driver card has no call button; no operator conversation, no pilot, and `now.md` still names a different product (traffic-light preemption).
+
+### Bugs found
+
+1. **Medium: the report's days are UTC days, while everything else is Dhaka time.** The date filters and the per-day CSV rows cut at UTC midnight (`backend/app/main.py:746-757, 811`), which is 06:00 in Dhaka. A mission dispatched at 01:30 on 19 October shows up in the 18 October row, and `start_date=2026-10-19` leaves it out. A quarter of every day, the night shift, lands on the wrong date in the one document a fleet owner will check against the paper log. Fix: cut days in `Asia/Dhaka` (fixed +06:00, no daylight saving) for the filters and the grouping, and update the spec text.
+2. **Low: the phone-change audit row cannot show what changed.** The test itself changes `+8801811234567` to `+8801911234567` and the log reads `***567->***567`. Fix: keep the operator prefix as well (`018****567`), or store a keyed hash of the full number.
+3. **Low: loose ends in the landmark search** (`backend/web/dispatcher/app.js:320-342`). It does not check `r.ok`, so a Nominatim rate-limit reply shows "Search error: Unexpected token". Two quick searches can show both result lists. The list stays open after a map click or a dispatch. The picked place name is not copied into the address field, so the dispatcher types it twice. Every search gets ", Dhaka, Bangladesh" appended. Fix: check `r.ok` with a "search unavailable, click the map" message, ignore stale replies, hide the list in `setPickup`, fill an empty address field from the pick.
+
+### Gaps, ranked
+
+1. **Zero demand evidence** (critical, market). No operator has been asked, there is no pilot and no letter of intent, and `now.md` says the primary goal is traffic-light connection, which this repo deliberately does not build.
+2. **No price or revenue model** (critical, profit). A small fleet's fee cannot pay for 24/7 support, and the public Apache 2.0 code is no moat.
+3. **Never hosted** (high, ops). No HTTPS host, no uptime alert, and backups are unencrypted on the same host (`ops/backup.sh`).
+4. **Never run on a real phone in a moving vehicle for a full shift** (high, usability). Only an emulator and headless Chromium so far.
+5. **No human security review** (high, security). Known leftovers: 50 wrong pairing codes pause pairing for everyone for 10 minutes (`backend/app/main.py:42-45`), `auth_audit` cannot be read in the console, tokens live in `localStorage`.
+6. **No counsel review** (high, legal). The PDPO 2025 position on driver tracking and consent, liability for a life-safety service, and the `[TODO]` sub-processors in `docs/pilot-agreement-draft.md` (hosting, backups, geocoder).
+7. **The driver cannot call anyone from the app** (high, UX). There is no `tel:` link and no caller-phone field (`docs/api-spec/openapi.yaml:454`), yet the app tells the driver to "Call the dispatcher" (`backend/web/driver/app.js:17, 35`).
+8. **The console is English only, sign-in is a pasted 43-character token each session, and the report has no date range in the UI** (medium, usability; `backend/web/dispatcher/index.html:2, 14-15`; `app.js:347`).
+9. **Map tiles and geocoding run on public OpenStreetMap services** (medium, ops). These cap use at about 1 request a second and forbid heavy commercial use, and the pickup area goes to a third party. Use Barikoi or a self-hosted Nominatim before a real fleet.
+10. **Live tracking is turning into a commodity** (medium, market). The BRTA GPS mandate covers tracking, so the selling point is the dispatch log and the response-time report, and nobody outside the repo has seen them. No public page or brand.
+
+### Next steps, in order
+
+1. **You:** talk to 5 small fleets (NGO, trust or hospital, under 20 vehicles), get one to agree to a 2-week shadow pilot, and ask what they would pay. Settle `now.md` in writing: signals parked until the roadmap gates, or stop this repo. Keep code frozen until this starts.
+2. **You:** run the Android wrapper on 2-3 cheap phones in a moving vehicle for a full shift, and host a staging copy on HTTPS with an uptime alert and encrypted offsite backups.
+3. **You:** get counsel's written answer on driver tracking and consent, and a paid human review of the auth and audit code.
+4. **Agent:** report days in Dhaka time plus a date range in the console; the landmark-search loose ends; the audit mask with the operator prefix (bugs 1-3). About half a day.
+5. **Agent:** a "Call dispatch" `tel:` button on the driver card, with the desk number in config. Add a caller phone only after counsel signs off.
+6. **Agent:** security leftovers. Replace the global pairing pause with a per-code attempt limit, add a read-only `auth_audit` view for admins, and encrypt backups and copy them offsite.
+
+**Docs corrected this round:** the score line at the top (it said 18%; the scorecard has said 16 since 2026-10-15), and status notes on the "Major gaps" and "Launch path" items that are no longer true. `now.md` is the owner's statement of priorities, not a claim about the code, so I left it alone; step 1 asks the owner to settle it.
