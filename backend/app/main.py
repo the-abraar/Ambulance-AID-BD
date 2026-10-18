@@ -11,9 +11,12 @@ from datetime import datetime, timedelta, timezone
 
 from pathlib import Path
 
+import csv
+import io
+
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from typing import Annotated
@@ -509,9 +512,13 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         return {"driver_id": did, "name": body.name, "phone": body.phone, "token": tok}  # token shown once; hash stored
 
     @app.patch("/drivers/{did}")
-    def update_driver(did: str, body: DriverPatch, u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
-        driver_user(db, did)
+    def update_driver(did: str, body: DriverPatch, u: dict = Depends(admin_only), db: Conn = Depends(get_db)):
+        # Admin only and audited: the phone receives every mission SMS (pickup address and map link).
+        uid = driver_user(db, did)
+        row = db.execute("SELECT phone FROM drivers WHERE id=?", (did,)).fetchone()
+        old_phone = row["phone"] if row else None
         db.execute("UPDATE drivers SET phone=? WHERE id=?", (body.phone, did))
+        auth_audit(db, u["id"], uid, f"update_phone:{old_phone}->{body.phone}")
         db.commit()
         return drivers(db, did)[0]
 
@@ -728,6 +735,163 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                        "WHERE u.id=?", (row["user_id"],)).fetchone()
         return {"token": tok["token"], "user": {"user_id": u["id"], "name": u["name"], "role": u["role"],
                                                 "driver_id": u["driver_id"], "token_expires_at": tok["expires_at"]}}
+
+    @app.get("/reports/response-times")
+    def response_time_report(start_date: str | None = None, end_date: str | None = None,
+                             vehicle_id: str | None = None, format: str = "json",
+                             u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
+        sql = ("SELECT m.id, m.status, m.assigned_vehicle_id, v.registration, v.operator, m.created_at, "
+               "m.acknowledged_at, m.en_route_pickup_at, m.at_scene_at, m.at_hospital_at, m.completed_at "
+               "FROM missions m LEFT JOIN vehicles v ON v.id=m.assigned_vehicle_id WHERE 1=1")
+        params = []
+        if start_date:
+            sql += " AND m.created_at >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND m.created_at <= ?"
+            params.append(end_date)
+        if vehicle_id:
+            sql += " AND m.assigned_vehicle_id = ?"
+            params.append(vehicle_id)
+        sql += " ORDER BY m.created_at ASC"
+
+        rows = db.execute(sql, tuple(params)).fetchall()
+
+        def parse_iso(ts):
+            if not ts:
+                return None
+            try:
+                return datetime.fromisoformat(ts)
+            except Exception:
+                return None
+
+        def calc_stats(numbers, round_to=1):
+            if not numbers:
+                return {"count": 0, "median": None, "p90": None, "min": None, "max": None}
+            s = sorted(numbers)
+            n = len(s)
+            med = s[n // 2] if n % 2 == 1 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+            p90 = s[min(int(n * 0.90), n - 1)]
+            return {
+                "count": n,
+                "median": round(med, round_to),
+                "p90": round(p90, round_to),
+                "min": round(s[0], round_to),
+                "max": round(s[-1], round_to),
+            }
+
+        all_ack_s, all_scene_m, all_hosp_m, all_total_m = [], [], [], []
+        days_map = {}
+        vehicles_map = {}
+
+        for r in rows:
+            t_created = parse_iso(r["created_at"])
+            t_ack = parse_iso(r["acknowledged_at"]) or parse_iso(r["en_route_pickup_at"])
+            t_scene = parse_iso(r["at_scene_at"])
+            t_hosp = parse_iso(r["at_hospital_at"])
+            t_comp = parse_iso(r["completed_at"])
+
+            ack_s = (t_ack - t_created).total_seconds() if t_ack and t_created and t_ack >= t_created else None
+            scene_m = (t_scene - t_ack).total_seconds() / 60.0 if t_scene and t_ack and t_scene >= t_ack else None
+            hosp_m = (t_hosp - t_scene).total_seconds() / 60.0 if t_hosp and t_scene and t_hosp >= t_scene else None
+            total_m = ((t_comp or t_hosp) - t_created).total_seconds() / 60.0 if (t_comp or t_hosp) and t_created else None
+
+            if ack_s is not None:
+                all_ack_s.append(ack_s)
+            if scene_m is not None:
+                all_scene_m.append(scene_m)
+            if hosp_m is not None:
+                all_hosp_m.append(hosp_m)
+            if total_m is not None:
+                all_total_m.append(total_m)
+
+            day = r["created_at"][:10] if r["created_at"] else "unknown"
+            if day not in days_map:
+                days_map[day] = {"ack_s": [], "scene_m": [], "hosp_m": [], "total_m": [], "count": 0}
+            days_map[day]["count"] += 1
+            if ack_s is not None: days_map[day]["ack_s"].append(ack_s)
+            if scene_m is not None: days_map[day]["scene_m"].append(scene_m)
+            if hosp_m is not None: days_map[day]["hosp_m"].append(hosp_m)
+            if total_m is not None: days_map[day]["total_m"].append(total_m)
+
+            v_id = r["assigned_vehicle_id"] or "unassigned"
+            if v_id not in vehicles_map:
+                vehicles_map[v_id] = {
+                    "vehicle_id": v_id,
+                    "registration": r["registration"] or "Unknown",
+                    "operator": r["operator"] or "Unknown",
+                    "ack_s": [], "scene_m": [], "hosp_m": [], "total_m": [], "count": 0
+                }
+            vehicles_map[v_id]["count"] += 1
+            if ack_s is not None: vehicles_map[v_id]["ack_s"].append(ack_s)
+            if scene_m is not None: vehicles_map[v_id]["scene_m"].append(scene_m)
+            if hosp_m is not None: vehicles_map[v_id]["hosp_m"].append(hosp_m)
+            if total_m is not None: vehicles_map[v_id]["total_m"].append(total_m)
+
+        summary = {
+            "total_missions": len(rows),
+            "dispatch_to_ack_s": calc_stats(all_ack_s, 1),
+            "ack_to_scene_m": calc_stats(all_scene_m, 1),
+            "scene_to_hospital_m": calc_stats(all_hosp_m, 1),
+            "total_turnaround_m": calc_stats(all_total_m, 1),
+        }
+
+        by_day = [
+            {
+                "day": d,
+                "missions_count": data["count"],
+                "dispatch_to_ack_s": calc_stats(data["ack_s"], 1),
+                "ack_to_scene_m": calc_stats(data["scene_m"], 1),
+                "scene_to_hospital_m": calc_stats(data["hosp_m"], 1),
+                "total_turnaround_m": calc_stats(data["total_m"], 1),
+            }
+            for d, data in sorted(days_map.items())
+        ]
+
+        by_vehicle = [
+            {
+                "vehicle_id": v_id,
+                "registration": data["registration"],
+                "operator": data["operator"],
+                "missions_count": data["count"],
+                "dispatch_to_ack_s": calc_stats(data["ack_s"], 1),
+                "ack_to_scene_m": calc_stats(data["scene_m"], 1),
+                "scene_to_hospital_m": calc_stats(data["hosp_m"], 1),
+                "total_turnaround_m": calc_stats(data["total_m"], 1),
+            }
+            for v_id, data in sorted(vehicles_map.items(), key=lambda x: x[1]["registration"])
+        ]
+
+        if format.lower() == "csv":
+            out_buf = io.StringIO()
+            writer = csv.writer(out_buf)
+            writer.writerow([
+                "Date", "Vehicle ID", "Registration", "Operator", "Missions",
+                "Median Dispatch-to-Ack (s)", "P90 Dispatch-to-Ack (s)",
+                "Median Ack-to-Scene (m)", "P90 Ack-to-Scene (m)",
+                "Median Scene-to-Hospital (m)", "P90 Scene-to-Hospital (m)",
+                "Median Turnaround (m)"
+            ])
+            for d in by_day:
+                writer.writerow([
+                    d["day"], "ALL", "All Vehicles", "-", d["missions_count"],
+                    d["dispatch_to_ack_s"]["median"], d["dispatch_to_ack_s"]["p90"],
+                    d["ack_to_scene_m"]["median"], d["ack_to_scene_m"]["p90"],
+                    d["scene_to_hospital_m"]["median"], d["scene_to_hospital_m"]["p90"],
+                    d["total_turnaround_m"]["median"]
+                ])
+            for v in by_vehicle:
+                writer.writerow([
+                    "ALL", v["vehicle_id"], v["registration"], v["operator"], v["missions_count"],
+                    v["dispatch_to_ack_s"]["median"], v["dispatch_to_ack_s"]["p90"],
+                    v["ack_to_scene_m"]["median"], v["ack_to_scene_m"]["p90"],
+                    v["scene_to_hospital_m"]["median"], v["scene_to_hospital_m"]["p90"],
+                    v["total_turnaround_m"]["median"]
+                ])
+            return Response(content=out_buf.getvalue(), media_type="text/csv",
+                            headers={"Content-Disposition": 'attachment; filename="response_times_report.csv"'})
+
+        return {"summary": summary, "by_day": by_day, "by_vehicle": by_vehicle}
 
     web = Path(__file__).resolve().parent.parent / "web"
     for mount, sub in (("/console", "dispatcher"), ("/driver", "driver")):

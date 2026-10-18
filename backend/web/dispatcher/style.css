@@ -51,3 +51,5 @@ path.veh-busy{stroke:#7a0016;fill:#e0452b;fill-opacity:.95}
 path.veh-stale{stroke:#555;fill:#bbb;fill-opacity:.9;stroke-dasharray:3 3}
 path.acc{stroke:#1d5fbf;fill:#1d5fbf;fill-opacity:.12;stroke-width:1}
 path.pickup{stroke:#1d5fbf;fill:#fff;fill-opacity:1;stroke-width:4}
+.map-search { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.map-search input { flex: 1; }

@@ -315,4 +315,54 @@ $("newd").onsubmit = async (e) => {
   } catch (err) { /* toast shown */ }
   refresh();
 };
+$("map-search-btn").onclick = async () => {
+  const q = $("map-search-input").value.trim();
+  if (!q) return;
+  try {
+    const url = "https://nominatim.openstreetmap.org/search?format=json&q=" + enc(q + ", Dhaka, Bangladesh") + "&countrycodes=bd&limit=5";
+    const r = await fetch(url, { headers: { "Accept-Language": "en" } });
+    const data = await r.json();
+    if (!data || !data.length) { toast("No location found for: " + q); return; }
+    const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+    map.setView([lat, lng], 15);
+    setPickup({ lat, lng });
+    toast("Map moved to: " + (data[0].display_name.split(",")[0] || q));
+  } catch (err) { toast("Search error: " + err.message); }
+};
+$("map-search-input").onkeydown = (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("map-search-btn").click(); }
+};
+
+$("btn-reports").onclick = async () => {
+  try {
+    const data = await api("GET", "/reports/response-times");
+    const tbody = $("reports-table").tBodies[0];
+    const s = data.summary || {};
+    const fmt = (v, unit) => (v != null ? `${v} ${unit}` : "-");
+    const rows = [
+      ["Dispatch to Ack", s.dispatch_to_ack_s ? s.dispatch_to_ack_s.count : 0, fmt(s.dispatch_to_ack_s ? s.dispatch_to_ack_s.median : null, "s"), fmt(s.dispatch_to_ack_s ? s.dispatch_to_ack_s.p90 : null, "s"), fmt(s.dispatch_to_ack_s ? s.dispatch_to_ack_s.min : null, "s"), fmt(s.dispatch_to_ack_s ? s.dispatch_to_ack_s.max : null, "s")],
+      ["Ack to Scene", s.ack_to_scene_m ? s.ack_to_scene_m.count : 0, fmt(s.ack_to_scene_m ? s.ack_to_scene_m.median : null, "min"), fmt(s.ack_to_scene_m ? s.ack_to_scene_m.p90 : null, "min"), fmt(s.ack_to_scene_m ? s.ack_to_scene_m.min : null, "min"), fmt(s.ack_to_scene_m ? s.ack_to_scene_m.max : null, "min")],
+      ["Scene to Hospital", s.scene_to_hospital_m ? s.scene_to_hospital_m.count : 0, fmt(s.scene_to_hospital_m ? s.scene_to_hospital_m.median : null, "min"), fmt(s.scene_to_hospital_m ? s.scene_to_hospital_m.p90 : null, "min"), fmt(s.scene_to_hospital_m ? s.scene_to_hospital_m.min : null, "min"), fmt(s.scene_to_hospital_m ? s.scene_to_hospital_m.max : null, "min")],
+      ["Turnaround Time", s.total_turnaround_m ? s.total_turnaround_m.count : 0, fmt(s.total_turnaround_m ? s.total_turnaround_m.median : null, "min"), fmt(s.total_turnaround_m ? s.total_turnaround_m.p90 : null, "min"), fmt(s.total_turnaround_m ? s.total_turnaround_m.min : null, "min"), fmt(s.total_turnaround_m ? s.total_turnaround_m.max : null, "min")],
+    ];
+    tbody.replaceChildren(...rows.map((r) => h("tr", {}, ...r.map((c) => td(String(c))))));
+    $("reports-dlg").showModal();
+  } catch (err) { /* toast shown */ }
+};
+$("btn-export-csv").onclick = async () => {
+  try {
+    const res = await fetch("/reports/response-times?format=csv", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `response_times_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) { toast("CSV export failed: " + err.message); }
+};
+
 if (token) connect();

@@ -15,12 +15,19 @@
     <button>Connect</button>
     <span id="who"></span>
   </form>
+  <button id="btn-reports" type="button">Response Times Report</button>
   <button id="sound" type="button" aria-pressed="false">Turn on alarm sound</button>
 </header>
 <p id="alarm" role="alert" hidden></p>
 <main>
   <section id="dispatch">
-    <div id="map" role="application" aria-label="Map of Dhaka. Click to place the pickup point; arrow keys pan."></div>
+    <div>
+      <div class="map-search">
+        <input id="map-search-input" placeholder="Search Dhaka landmark or area (e.g. Dhanmondi, DMCH)" aria-label="Search map location">
+        <button type="button" id="map-search-btn">Find on map</button>
+      </div>
+      <div id="map" role="application" aria-label="Map of Dhaka. Click to place the pickup point; arrow keys pan."></div>
+    </div>
     <form id="newm">
       <h2>New mission</h2>
       <label>1. Pickup address or landmark
@@ -96,6 +103,19 @@
   <p id="audit-what"></p>
   <ol id="audit"></ol>
 </aside>
+<dialog id="reports-dlg" aria-labelledby="reports-h">
+  <form method="dialog">
+    <h2 id="reports-h">Response times</h2>
+    <p><button type="button" id="btn-export-csv">Export CSV</button></p>
+    <table id="reports-table">
+      <thead><tr><th>Metric</th><th>Count</th><th>Median</th><th>P90</th><th>Min</th><th>Max</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="dlg-actions">
+      <button value="close">Close</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="cancel-dlg" aria-labelledby="cancel-h">
   <form method="dialog">
     <h2 id="cancel-h">Cancel this mission?</h2>

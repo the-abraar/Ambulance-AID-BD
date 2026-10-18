@@ -5,8 +5,8 @@
 	}
 	header {
 		# Leaflet (vendored) positions tiles through element.style, which CSP allows; markup must not use style="".
-		# The map tiles come from tile.openstreetmap.org and its subdomains.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		# The map tiles come from tile.openstreetmap.org and its subdomains; landmark search calls Nominatim.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; script-src 'self'; connect-src 'self' https://nominatim.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY

@@ -313,7 +313,7 @@ paths:
 
   /drivers/{driverId}:
     patch:
-      summary: Set or clear a driver's phone (dispatcher only)
+      summary: Set or clear a driver's phone (admin only, audited)
       operationId: updateDriver
       security: [{BearerAuth: []}]
       parameters:
@@ -325,6 +325,7 @@ paths:
             schema: {type: object, required: [phone], properties: {phone: {$ref: '#/components/schemas/PhoneIn'}}}
       responses:
         '200': {description: Driver., content: {application/json: {schema: {$ref: '#/components/schemas/DriverSummary'}}}}
+        '403': {description: Not an admin.}
         '404': {description: Unknown driver.}
         '422': {description: Not a Bangladesh mobile number.}
 
@@ -407,6 +408,28 @@ paths:
         '204': {description: Revoked.}
         '403': {description: Not an admin.}
         '404': {description: Unknown user.}
+
+  /reports/response-times:
+    get:
+      summary: Response time metrics report (dispatcher only)
+      operationId: getResponseTimesReport
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: start_date, in: query, required: false, schema: {type: string}}
+        - {name: end_date, in: query, required: false, schema: {type: string}}
+        - {name: vehicle_id, in: query, required: false, schema: {type: string}}
+        - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
+      responses:
+        '200':
+          description: Response times metrics or streaming CSV.
+          content:
+            application/json:
+              schema:
+                type: object
+            text/csv:
+              schema:
+                type: string
+        '403': {description: Not a dispatcher.}
 
 components:
   securitySchemes:

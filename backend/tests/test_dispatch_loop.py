@@ -222,7 +222,10 @@ def test_driver_phone_api(env):
     assert r.status_code == 201 and r.json()["phone"] == "+8801811234567"
     assert c.post("/drivers", json={"name": "k", "phone": "12345"}, headers=D).status_code == 422
     did = r.json()["driver_id"]
-    assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=env["P"]).json()["phone"] == "+8801911234567"
+    assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=env["P"]).status_code == 403
+    assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=D).json()["phone"] == "+8801911234567"
+    audit = env["db"].execute("SELECT * FROM auth_audit WHERE action LIKE 'update_phone%'").fetchone()
+    assert audit is not None
     assert c.patch(f"/drivers/{did}", json={"phone": "abc"}, headers=D).status_code == 422
     assert c.patch(f"/drivers/{did}", json={"phone": None}, headers=D).json()["phone"] is None
     assert c.patch("/drivers/nope", json={"phone": None}, headers=D).status_code == 404
@@ -299,3 +302,19 @@ def test_b12_create_and_audit_are_atomic(env, monkeypatch):
     with pytest.raises(RuntimeError):
         env["c"].post("/vehicles", json={"operator": "o", "registration": "GHOST"}, headers=env["D"])
     assert (n("drivers"), n("users"), n("vehicles")) == before
+
+
+def test_response_times_report(env):
+    from tests.test_oct15 import FULL, backfill
+    c, D, V = env["c"], env["D"], env["V"]
+    assert c.get("/reports/response-times", headers=V).status_code == 403
+    assert backfill(env, FULL).status_code == 201  # dispatched -3 h, en route -2.9, scene -2.7, hospital -2.2, done -2
+    s = c.get("/reports/response-times", headers=D).json()["summary"]
+    assert s["total_missions"] == 1
+    assert s["dispatch_to_ack_s"]["median"] == 360.0
+    assert s["ack_to_scene_m"]["median"] == 12.0
+    assert s["scene_to_hospital_m"]["median"] == 30.0
+    assert s["total_turnaround_m"]["median"] == 60.0
+    csv_res = c.get("/reports/response-times?format=csv", headers=D)
+    assert csv_res.status_code == 200 and csv_res.headers["content-type"].startswith("text/csv")
+    assert "Registration" in csv_res.text.splitlines()[0]
