@@ -16,6 +16,7 @@
     <span id="who"></span>
   </form>
   <button id="btn-reports" type="button">Response Times Report</button>
+  <button id="btn-authlog" type="button" class="admin-only" hidden>Auth log</button>
   <button id="sound" type="button" aria-pressed="false">Turn on alarm sound</button>
 </header>
 <p id="alarm" role="alert" hidden></p>
@@ -112,6 +113,18 @@
     <p><button type="button" id="btn-export-csv">Export CSV</button></p>
     <table id="reports-table">
       <thead><tr><th>Metric</th><th>Count</th><th>Median</th><th>P90</th><th>Min</th><th>Max</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="dlg-actions">
+      <button value="close">Close</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="authlog-dlg" aria-labelledby="authlog-h">
+  <form method="dialog">
+    <h2 id="authlog-h">Auth log (read-only, Dhaka time, newest 200)</h2>
+    <table id="authlog-table">
+      <thead><tr><th>Time</th><th>By</th><th>Action</th><th>Target</th></tr></thead>
       <tbody></tbody>
     </table>
     <div class="dlg-actions">

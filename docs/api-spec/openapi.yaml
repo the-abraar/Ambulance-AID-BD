@@ -368,6 +368,21 @@ paths:
         '403': {description: Not an admin.}
         '404': {description: Unknown driver.}
 
+  /auth-audit:
+    get:
+      summary: Who created, rotated, revoked or paired which credential, newest first (admin only, read-only)
+      description: Rows never hold tokens, pairing codes or full phone numbers (a phone change shows operator prefix and last 3 digits).
+      operationId: listAuthAudit
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: Audit rows.
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuthAuditRow'}}}}
+        '403': {description: Not an admin.}
+
   /users:
     get:
       summary: List all users with role and token state (admin only)
@@ -647,6 +662,19 @@ components:
             role: {type: string, enum: [driver]}
             driver_id: {type: string}
             token_expires_at: {type: string, format: date-time}
+
+    AuthAuditRow:
+      type: object
+      additionalProperties: false
+      required: [id, ts, action, actor_id, actor_name, target_user_id, target_name]
+      properties:
+        id: {type: integer}
+        ts: {type: string, format: date-time}
+        action: {type: string, description: "create_driver, create_user, create_vehicle, pairing_code, pair, rotate, revoke, update_phone:018****567->019****567, ..."}
+        actor_id: {type: string}
+        actor_name: {type: [string, "null"]}
+        target_user_id: {type: string}
+        target_name: {type: [string, "null"]}
 
     UserSummary:
       type: object

@@ -257,3 +257,18 @@ def test_n4_per_code_cap_keeps_guessing_infeasible(env):
     assert PAIR_CODE_TTL.total_seconds() <= PAIR_WINDOW_S
     assert PAIR_CODE_FAILS / 10 ** 6 <= 1 / 20_000  # chance that a guesser takes over a given code
     assert PAIR_CLIENT_FAILS >= 15  # an onboarding room gets more typos than it has drivers
+
+
+def test_auth_audit_view_is_admin_only_and_read_only(env):
+    c, D = env["c"], env["D"]
+    for hdr in (env["P"], env["V"]):  # plain dispatcher, driver
+        assert c.get("/auth-audit", headers=hdr).status_code == 403
+    assert c.get("/auth-audit").status_code == 401
+    code_for(env, env["drv"])
+    c.patch(f"/drivers/{env['drv']}", json={"phone": "01811234567"}, headers=D)
+    rows = c.get("/auth-audit", headers=D).json()
+    assert [r["action"] for r in rows[:2]] == ["update_phone:none->018****567", "pairing_code"]  # newest first
+    assert rows[0]["actor_name"] == "disp" and rows[0]["target_name"] == "drv1"
+    assert len(c.get("/auth-audit?limit=1&offset=1", headers=D).json()) == 1
+    assert c.get("/auth-audit?limit=501", headers=D).status_code == 422
+    assert c.post("/auth-audit", headers=D).status_code == 405 and c.delete("/auth-audit", headers=D).status_code == 405

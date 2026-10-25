@@ -690,6 +690,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                  "revoked": r["revoked_at"] is not None, "expires_at": r["token_expires_at"]}
                 for r in db.execute("SELECT id, name, role, admin, revoked_at, token_expires_at FROM users ORDER BY name")]
 
+    @app.get("/auth-audit")
+    def list_auth_audit(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                        u: dict = Depends(admin_only), db: Conn = Depends(get_db)):
+        # Read-only, admin only, newest first. The log never holds tokens, codes or full phone numbers.
+        return [dict(r) for r in db.execute(
+            "SELECT a.id, a.ts, a.action, a.actor_id, ua.name AS actor_name, a.target_user_id, ut.name AS target_name "
+            "FROM auth_audit a LEFT JOIN users ua ON ua.id=a.actor_id LEFT JOIN users ut ON ut.id=a.target_user_id "
+            "ORDER BY a.id DESC LIMIT ? OFFSET ?", (limit, offset))]
+
     @app.post("/users", status_code=201)
     def create_user(body: UserIn, u: dict = Depends(admin_only), db: Conn = Depends(get_db)):
         # Dispatchers and admins only; drivers come from POST /drivers because they need a driver record.

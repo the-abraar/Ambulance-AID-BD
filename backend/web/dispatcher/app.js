@@ -364,6 +364,14 @@ $("btn-reports").onclick = async () => {
     $("reports-dlg").showModal();
   } catch (err) { /* toast shown */ }
 };
+$("btn-authlog").onclick = async () => {
+  try {
+    const rows = await api("GET", "/auth-audit?limit=200");
+    $("authlog-table").tBodies[0].replaceChildren(...rows.map((r) => h("tr", {},
+      td(dhaka(r.ts)), td(r.actor_name || short(r.actor_id)), td(r.action), td(r.target_name || short(r.target_user_id)))));
+    $("authlog-dlg").showModal();
+  } catch (err) { /* toast shown */ }
+};
 $("btn-export-csv").onclick = async () => {
   try {
     const res = await fetch("/reports/response-times?format=csv", {
