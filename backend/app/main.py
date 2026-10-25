@@ -108,6 +108,11 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     if not all(re.fullmatch(r"([0-9A-F]{2}:){31}[0-9A-F]{2}", c) for c in android_certs):
         raise RuntimeError("AMBULANCE_ANDROID_CERT_SHA256 must be colon-separated SHA-256 fingerprints (AB:CD:...)")
 
+    # The dispatch desk's number for the driver app's "Call dispatch" button; unset = no button.
+    dispatch_phone = re.sub(r"[\s-]", "", os.environ.get("AMBULANCE_DISPATCH_PHONE", ""))
+    if dispatch_phone and not re.fullmatch(r"\+?\d{5,15}", dispatch_phone):
+        raise RuntimeError("AMBULANCE_DISPATCH_PHONE must be 5 to 15 digits, optionally starting with +")
+
     def prune():
         with closing(open_db(path)) as db:
             db.execute("DELETE FROM ping_limit WHERE last_at<?", (time.time() - PING_LIMIT_KEEP_S,))
@@ -394,6 +399,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             r["vehicle_id"] = m["assigned_vehicle_id"] if m else None
             v = db.execute("SELECT id FROM vehicles WHERE driver_id=? AND active", (u["driver_id"],)).fetchone()
             r["paired_vehicle_id"] = v["id"] if v else None  # what an on-shift wrapper reports between missions
+            r["dispatch_phone"] = dispatch_phone or None
         return r
 
     def current_row(db: Conn, did: str, recent_s: float = 0):

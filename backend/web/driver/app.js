@@ -4,7 +4,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '
 const T = {
   bn: {title: 'চালক', lang: 'English', code: 'ডিসপ্যাচারের দেওয়া ৬ সংখ্যার কোড', pasteTok: 'কোডের বদলে টোকেন দিন', token: 'অ্যাক্সেস টোকেন',
     login: 'প্রবেশ', logout: 'বের হন', logoutQ: 'বের হবেন? আবার প্রবেশ করতে ডিসপ্যাচারের কাছ থেকে নতুন কোড লাগবে।', refresh: 'রিফ্রেশ',
-    none: 'কোনো মিশন নেই', mission: 'বর্তমান মিশন', status: 'অবস্থা', pickup: 'পিকআপ', navigate: 'নেভিগেট', next: 'পরবর্তী ধাপ', noNext: 'আর কোনো ধাপ নেই',
+    none: 'কোনো মিশন নেই', mission: 'বর্তমান মিশন', status: 'অবস্থা', pickup: 'পিকআপ', navigate: 'নেভিগেট', callDesk: 'ডিসপ্যাচে ফোন করুন', next: 'পরবর্তী ধাপ', noNext: 'আর কোনো ধাপ নেই',
     confirm: 'নিশ্চিত করুন', yes: 'হ্যাঁ', no: 'না', ok: 'অবস্থা আপডেট হয়েছে', sending: 'পাঠানো হচ্ছে…', pairing: 'কোড যাচাই হচ্ছে…',
     newM: 'নতুন মিশন', accept: 'গ্রহণ করুন', eAck: 'গ্রহণ পাঠানো যায়নি। আবার চেষ্টা করুন।', alertsOn: 'মিশন সতর্কতা চালু করুন (শব্দ ও নোটিফিকেশন)',
     cancelled: 'ডিসপ্যাচার মিশনটি বাতিল করেছেন', completed: 'মিশন সম্পন্ন',
@@ -22,7 +22,7 @@ const T = {
     shiftFail: 'ডিউটি চালু হয়নি: অ্যাপকে লোকেশনের অনুমতি দিন।'},
   en: {title: 'Driver', lang: 'বাংলা', code: '6-digit code from the dispatcher', pasteTok: 'Use a token instead', token: 'Access token',
     login: 'Sign in', logout: 'Sign out', logoutQ: 'Sign out? You will need a new code from the dispatcher to sign in again.', refresh: 'Refresh',
-    none: 'No mission', mission: 'Current mission', status: 'Status', pickup: 'Pickup', navigate: 'Navigate', next: 'Next step', noNext: 'No further steps',
+    none: 'No mission', mission: 'Current mission', status: 'Status', pickup: 'Pickup', navigate: 'Navigate', callDesk: 'Call dispatch', next: 'Next step', noNext: 'No further steps',
     confirm: 'Confirm', yes: 'Yes', no: 'No', ok: 'Status updated', sending: 'Sending…', pairing: 'Checking code…',
     newM: 'New mission', accept: 'Accept', eAck: 'Could not accept. Try again.', alertsOn: 'Turn on mission alerts (sound and notification)',
     cancelled: 'Cancelled by dispatcher', completed: 'Mission completed',
@@ -262,6 +262,11 @@ function navLink(m) { // built only from numeric lat/lng, never from strings
   return `<p><a id="nav" class="navlink" href="https://www.google.com/maps/dir/?api=1&destination=${la},${ln}" target="_blank" rel="noopener">${esc(t('navigate'))}</a></p>`;
 }
 
+function callLink() { // the desk number comes from the server's config; only a plain number is ever put in an href
+  const n = me?.dispatch_phone;
+  return typeof n === 'string' && /^\+?\d{5,15}$/.test(n) ? `<p><a id="calldesk" class="navlink" href="tel:${n}">${esc(t('callDesk'))}</a></p>` : '';
+}
+
 function render() {
   document.documentElement.lang = lang;
   $('title').textContent = t('title'); $('lang').textContent = t('lang');
@@ -280,10 +285,10 @@ function render() {
     const id = `#<span title="${esc(mission.mission_id)}">${esc(mission.mission_id.slice(0, 8))}</span>`;
     const pick = `<p>${esc(t('pickup'))}: ${esc(mission.pickup_address)}</p>`;
     if (!active()) h += `<div class="card ended"><h2>${esc(t(mission.status === 'CANCELLED' ? 'cancelled' : 'completed'))}</h2><p>${id}</p>${pick}</div>`;
-    else if (!mission.acknowledged_at) h += `<div class="card new"><h2>${esc(t('newM'))} ${id}</h2>${pick}${navLink(mission)}</div><button class="big" id="ack">${esc(t('accept'))}</button>`;
+    else if (!mission.acknowledged_at) h += `<div class="card new"><h2>${esc(t('newM'))} ${id}</h2>${pick}${navLink(mission)}${callLink()}</div><button class="big" id="ack">${esc(t('accept'))}</button>`;
     else {
       const nx = trans[mission.status] || [];
-      h += `<div class="card"><h2>${esc(t('mission'))} ${id}</h2><p>${esc(t('status'))}: <span class="badge">${sl(mission.status)}</span></p>${pick}${navLink(mission)}</div>
+      h += `<div class="card"><h2>${esc(t('mission'))} ${id}</h2><p>${esc(t('status'))}: <span class="badge">${sl(mission.status)}</span></p>${pick}${navLink(mission)}${callLink()}</div>
         <h3>${esc(t('next'))}</h3>` + (nx.length ? nx.map(s => `<button class="big" data-s="${esc(s)}">${sl(s)}</button>`).join('') : `<p>${esc(t('noNext'))}</p>`);
     }
   }

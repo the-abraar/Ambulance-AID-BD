@@ -550,6 +550,7 @@ components:
         token_expires_at: {type: [string, "null"], format: date-time}
         driver_id: {type: string}
         vehicle_id: {type: [string, "null"], description: Driver only. The active mission's vehicle.}
+        dispatch_phone: {type: [string, "null"], description: "Driver only. The dispatch desk's number (AMBULANCE_DISPATCH_PHONE) for the app's Call dispatch button; null when unset."}
         paired_vehicle_id: {type: [string, "null"], description: "Driver only. The in-service vehicle paired with him; an on-shift wrapper reports it between missions."}
 
     TokenRotated:

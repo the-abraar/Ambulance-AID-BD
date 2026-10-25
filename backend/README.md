@@ -26,6 +26,7 @@ After changing `requirements.txt`, regenerate it with the command in the lock fi
 | `AMBULANCE_PING_RETENTION_DAYS` | `90` | GPS pings older than this are deleted at startup and once a day. Minimum 1. |
 | `AMBULANCE_SMS_API_KEY`, `AMBULANCE_SMS_SENDER_ID` | unset | Both set = SMS fallback on (below). Either missing = off. |
 | `AMBULANCE_SMS_URL` | `https://bulksmsbd.net/api/smsapi` | Gateway endpoint; tests point it at a local fake. |
+| `AMBULANCE_DISPATCH_PHONE` | unset | The dispatch desk's number (5 to 15 digits, optional `+`). Set = the driver app shows a "Call dispatch" `tel:` button on the mission card; unset = no button. A malformed value stops startup. |
 | `AMBULANCE_ANDROID_CERT_SHA256` | unset | The Android app's signing-key SHA-256 fingerprints (`AB:CD:...`, comma-separated). Set = `/.well-known/assetlinks.json` lets the app open the console's pairing QR (App Link); unset = 404 and the QR opens the browser. A malformed value stops startup. |
 | `FORWARDED_ALLOW_IPS` | uvicorn: `127.0.0.1` | Behind Caddy, set it to Caddy's address so `POST /pair`'s per-client limit sees the phone's IP, not Caddy's. |
 

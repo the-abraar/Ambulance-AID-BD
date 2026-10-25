@@ -124,3 +124,20 @@ def test_n8_assetlinks_lets_the_pairing_qr_open_the_android_app(env, monkeypatch
     monkeypatch.setenv("AMBULANCE_ANDROID_CERT_SHA256", "AB:CD")
     with pytest.raises(RuntimeError):  # a typo would silently break verification: fail at startup instead
         create_app(env["path"])
+
+
+def test_dispatch_phone_from_config(env, monkeypatch, target):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    assert env["c"].get("/me", headers=env["V"]).json()["dispatch_phone"] is None  # unset: no button
+    assert "dispatch_phone" not in env["c"].get("/me", headers=env["D"]).json()
+    monkeypatch.setenv("AMBULANCE_DISPATCH_PHONE", "+880 2-5566 7788")
+    c = TestClient(create_app(target, ping_min_interval_s=0))
+    assert c.get("/me", headers=env["V"]).json()["dispatch_phone"] == "+880255667788"
+    monkeypatch.setenv("AMBULANCE_DISPATCH_PHONE", "tel:evil")
+    import pytest
+    with pytest.raises(RuntimeError):
+        create_app(target)
+    js = (Path(__file__).resolve().parent.parent / "web/driver/app.js").read_text(encoding="utf-8")
+    assert js.count("${callLink()}") == 2 and js.count("callDesk:") == 2  # both languages, both mission cards
