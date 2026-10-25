@@ -379,3 +379,15 @@ Re-review of `ba8c2c8` against the 2026-10-18 review (at `440dbb8`) and its re-s
 6. **Agent:** security leftovers. Replace the global pairing pause with a per-code attempt limit, add a read-only `auth_audit` view for admins, and encrypt backups and copy them offsite.
 
 **Docs corrected this round:** the score line at the top (it said 18%; the scorecard has said 16 since 2026-10-15), and status notes on the "Major gaps" and "Launch path" items that are no longer true. `now.md` is the owner's statement of priorities, not a claim about the code, so I left it alone; step 1 asks the owner to settle it.
+
+## Update (2026-10-25, agent round)
+
+Agent-made on `main`, local commits only (not pushed, not human-reviewed). `scripts/check.sh` exit 0: 184 passed, 1 skipped, both orders, SQLite only (Postgres and the browser e2e not run; the e2e gained two checks I could not execute, Playwright is not installed here). Score unchanged: nothing here moves the cap.
+- **Bug 1 fixed:** report filters and per-day rows cut at Asia/Dhaka (+06:00) midnight; spec text updated.
+- **Bug 2 fixed:** phone-change audit shows operator prefix and last 3 digits (`018****567`).
+- **Bug 3 fixed:** landmark search checks `r.ok` ("Search unavailable, click the map"), ignores stale replies, closes the list in `setPickup`, fills an empty address field from the pick. The ", Dhaka, Bangladesh" suffix is unchanged.
+- **Gap 7 partly:** driver card has a "Call dispatch" `tel:` button; the number is `AMBULANCE_DISPATCH_PHONE` (unset = no button). No caller-phone field (needs counsel).
+- **Gap 5 partly:** the global 50-guess pause is gone. Every wrong guess counts against each live code, which is deleted after 50 (1 in 20,000 per code). Pairing is never paused for everyone, but a guesser can now burn live codes (an admin reissues). The per-client limit of 20 stays.
+- **Gap 5 partly:** `GET /auth-audit` and a console "Auth log" dialog, admin only, read-only, newest 200. Tokens still live in `localStorage`.
+
+**Skipped:** encrypted offsite backups (needs the owner's key and host), caller phone field (counsel), console date range for the report, plus all non-code gaps (demand, hosting, review, counsel).
