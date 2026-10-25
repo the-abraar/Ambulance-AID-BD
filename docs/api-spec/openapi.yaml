@@ -415,8 +415,8 @@ paths:
       operationId: getResponseTimesReport
       security: [{BearerAuth: []}]
       parameters:
-        - {name: start_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, UTC day, inclusive'}
-        - {name: end_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, UTC day, inclusive'}
+        - {name: start_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, Asia/Dhaka (+06:00) day, inclusive'}
+        - {name: end_date, in: query, required: false, schema: {type: string, format: date}, description: 'YYYY-MM-DD, Asia/Dhaka (+06:00) day, inclusive'}
         - {name: vehicle_id, in: query, required: false, schema: {type: string}}
         - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
       responses:

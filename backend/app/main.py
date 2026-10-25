@@ -29,6 +29,7 @@ from .db import (TOKEN_TTL_DAYS, Conn, IntegrityError, close_pools, db_target, h
                  token_expiry)
 from .state_machine import INITIAL, TRANSITIONS, InvalidTransition, State, on_behalf, required_role, transition
 
+DHAKA = timezone(timedelta(hours=6))  # Asia/Dhaka: fixed +06:00, no daylight saving
 MAX_BODY = 64 * 1024  # keep equal to request_body max_size in Caddyfile
 PING_LIMIT_KEEP_S = 86400
 PRUNE_EVERY_S = 86400  # besides the prune at startup, so a server that runs for months keeps these tables small
@@ -518,7 +519,8 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         row = db.execute("SELECT phone FROM drivers WHERE id=?", (did,)).fetchone()
         old_phone = row["phone"] if row else None
         db.execute("UPDATE drivers SET phone=? WHERE id=?", (body.phone, did))
-        tail = lambda p: f"***{p[-3:]}" if p else "none"  # auth_audit is never pruned: keep only the last 3 digits
+        # auth_audit is never pruned: keep the operator prefix and the last 3 digits (+8801811234567 -> 018****567)
+        tail = lambda p: f"{p[3:6]}****{p[-3:]}" if p else "none"
         auth_audit(db, u["id"], uid, f"update_phone:{tail(old_phone)}->{tail(body.phone)}")
         db.commit()
         return drivers(db, did)[0]
@@ -745,13 +747,15 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                "m.acknowledged_at, m.en_route_pickup_at, m.at_scene_at, m.at_hospital_at, m.completed_at "
                "FROM missions m LEFT JOIN vehicles v ON v.id=m.assigned_vehicle_id WHERE m.status <> ?")
         params = [State.CANCELLED.value]  # a cancelled mission has no response to time
-        # created_at is ISO text in UTC; end_date includes its whole (UTC) day, so compare against the next day.
+        # created_at is ISO text in UTC; a report day is a Dhaka day, so convert the bounds; end_date includes its whole day.
+        def dhaka_midnight(d: date) -> str:
+            return datetime.combine(d, datetime.min.time(), DHAKA).astimezone(timezone.utc).isoformat(timespec="microseconds")
         if start_date:
             sql += " AND m.created_at >= ?"
-            params.append(start_date.isoformat())
+            params.append(dhaka_midnight(start_date))
         if end_date:
             sql += " AND m.created_at < ?"
-            params.append((end_date + timedelta(days=1)).isoformat())
+            params.append(dhaka_midnight(end_date + timedelta(days=1)))
         if vehicle_id:
             sql += " AND m.assigned_vehicle_id = ?"
             params.append(vehicle_id)
@@ -808,7 +812,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             if total_m is not None:
                 all_total_m.append(total_m)
 
-            day = r["created_at"][:10] if r["created_at"] else "unknown"
+            day = t_created.astimezone(DHAKA).date().isoformat() if t_created else "unknown"
             if day not in days_map:
                 days_map[day] = {"ack_s": [], "scene_m": [], "hosp_m": [], "total_m": [], "count": 0}
             days_map[day]["count"] += 1

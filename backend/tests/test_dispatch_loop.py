@@ -226,7 +226,7 @@ def test_driver_phone_api(env):
     assert c.patch(f"/drivers/{did}", json={"phone": "01911234567"}, headers=D).json()["phone"] == "+8801911234567"
     # Bound parameter, not a literal: psycopg reads a bare % in the SQL as a placeholder.
     audit = env["db"].execute("SELECT action FROM auth_audit WHERE action LIKE ?", ("update_phone%",)).fetchall()
-    assert [a["action"] for a in audit] == ["update_phone:***567->***567"]  # last 3 digits only, never the numbers
+    assert [a["action"] for a in audit] == ["update_phone:018****567->019****567"]  # operator prefix and last 3 digits, never the numbers
     assert c.patch(f"/drivers/{did}", json={"phone": "abc"}, headers=D).status_code == 422
     assert c.patch(f"/drivers/{did}", json={"phone": None}, headers=D).json()["phone"] is None
     assert c.patch("/drivers/nope", json={"phone": None}, headers=D).status_code == 404
@@ -303,6 +303,19 @@ def test_b12_create_and_audit_are_atomic(env, monkeypatch):
     with pytest.raises(RuntimeError):
         env["c"].post("/vehicles", json={"operator": "o", "registration": "GHOST"}, headers=env["D"])
     assert (n("drivers"), n("users"), n("vehicles")) == before
+
+
+def test_report_days_are_dhaka_days(env):
+    from tests.test_oct15 import FULL, backfill
+    c, D = env["c"], env["D"]
+    mid = backfill(env, FULL).json()["mission_id"]
+    # 19:30 UTC on the 18th is 01:30 on the 19th in Dhaka
+    env["db"].execute("UPDATE missions SET created_at='2026-10-18T19:30:00.000000+00:00' WHERE id=?", (mid,)); env["db"].commit()
+    n = lambda q: c.get("/reports/response-times" + q, headers=D).json()["summary"]["total_missions"]
+    assert (n("?start_date=2026-10-19"), n("?end_date=2026-10-19"), n("?end_date=2026-10-18"), n("?start_date=2026-10-20")) == (1, 1, 0, 0)
+    assert [d["day"] for d in c.get("/reports/response-times", headers=D).json()["by_day"]] == ["2026-10-19"]
+    env["db"].execute("UPDATE missions SET created_at='2026-10-18T17:59:59.000000+00:00' WHERE id=?", (mid,)); env["db"].commit()
+    assert [d["day"] for d in c.get("/reports/response-times", headers=D).json()["by_day"]] == ["2026-10-18"]  # 23:59:59 Dhaka
 
 
 def test_response_times_report(env):
