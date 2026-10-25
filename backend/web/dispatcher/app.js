@@ -76,11 +76,12 @@ const map = L.map("map", { center: DHAKA_CENTRE, zoom: 12 });
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
 const vehLayer = L.layerGroup().addTo(map);
-let pickupMark = null;
+let pickupMark = null, searchSeq = 0;
 function setPickup(ll) {
   pickup = ll && { lat: +ll.lat.toFixed(5), lng: +ll.lng.toFixed(5) }; // ~1 m; more digits would be false precision
   if (pickupMark) pickupMark.remove();
   pickupMark = pickup && L.circleMarker(pickup, { radius: 10, className: "pickup", interactive: false }).addTo(map);
+  const list = $("map-search-results"); list.replaceChildren(); list.hidden = true; // a map click or dispatch closes the search list
   $("pickup").textContent = pickup ? `${pickup.lat}, ${pickup.lng}` : "not set, click the map";
 }
 map.on("click", (e) => setPickup(e.latlng));
@@ -320,24 +321,28 @@ $("newd").onsubmit = async (e) => {
 $("map-search-btn").onclick = async () => {
   const q = $("map-search-input").value.trim(), list = $("map-search-results");
   list.replaceChildren(); list.hidden = true;
+  const seq = ++searchSeq; // a slower, older reply must not overwrite a newer search
   if (!q) return;
   try {
     const url = "https://nominatim.openstreetmap.org/search?format=json&q=" + enc(q + ", Dhaka, Bangladesh") + "&countrycodes=bd&limit=5";
     const r = await fetch(url, { headers: { "Accept-Language": "en" } });
+    if (!r.ok) { toast("Search unavailable, click the map"); return; }
     const data = await r.json();
+    if (seq !== searchSeq) return;
     if (!data || !data.length) { toast("No location found for: " + q); return; }
     map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 15);
     list.append(...data.map((d) => h("li", {}, btn(d.display_name, () => {
       const lat = parseFloat(d.lat), lng = parseFloat(d.lon);
       map.setView([lat, lng], 15);
       setPickup({ lat, lng });
-      list.replaceChildren(); list.hidden = true;
+      const addr = document.querySelector('input[name="addr"]');
+      if (addr && !addr.value.trim()) addr.value = d.display_name.slice(0, addr.maxLength); // the dispatcher need not type it twice
       $("map-search-input").focus(); // the clicked button is gone; keep keyboard focus in the search area
       toast("Pickup set: " + d.display_name);
     }))));
     list.hidden = false;
     list.querySelector("button").focus();
-  } catch (err) { toast("Search error: " + err.message); }
+  } catch (err) { if (seq === searchSeq) toast("Search unavailable, click the map"); }
 };
 $("map-search-input").onkeydown = (e) => {
   if (e.key === "Enter") { e.preventDefault(); $("map-search-btn").click(); }

@@ -202,6 +202,10 @@ def run(base, dtok, ctok):
         wait(con, "document.getElementById('map-search-results').hidden")
         ok(con.inner_text("#pickup") == "23.7104, 90.4074" and con.evaluate("document.activeElement.id") == "map-search-input",
            "picking the second match by keyboard sets the pickup there and returns focus to the search box")
+        ok(con.input_value("#newm [name=addr]") == "Dhanmondi, Old Dhaka", "an empty address field is filled from the pick")
+        con.route("https://nominatim.openstreetmap.org/**", lambda r: r.fulfill(status=429, body="slow down"))
+        con.fill("#map-search-input", "Gulshan"); con.press("#map-search-input", "Enter")
+        wait(con, "document.getElementById('toasts').textContent.includes('Search unavailable')")
         con.evaluate("map.setView(DHAKA_CENTRE, 12)")  # back to the start view: later checks need the vehicles on screen
 
         con.fill("#newv [name=operator]", "RedCrescent"); con.fill("#newv [name=registration]", "DHK-E2E")
