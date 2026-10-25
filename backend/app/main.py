@@ -40,10 +40,11 @@ IDLE_PING_S = 30  # between missions a vehicle keeps at most one position per 30
 RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission this long, so the driver sees why
 BACKFILL_WINDOW = timedelta(days=7)  # how far back a paper-log back-fill or an on-behalf event_time may go
 PAIR_CODE_TTL = timedelta(minutes=10)
-# Wrong /pair codes in a sliding 10-minute window. Per client, so one room's typos never block another (and a success
-# clears that client's count); globally, so at most 50 guesses fall in a code's 10-minute life: 1 in 20,000 for a
-# 6-digit code. A wrong code never kills anyone's live code.
-PAIR_WINDOW_S, PAIR_CLIENT_FAILS, PAIR_GLOBAL_FAILS = 600, 20, 50
+# Wrong /pair codes. Per client in a sliding 10-minute window, so one room's typos never block another (a success
+# clears that client's count). Per code: every wrong guess counts against each live code, and a code that has taken
+# PAIR_CODE_FAILS wrong guesses is deleted (an admin issues a new one), so a guesser has at most 50 tries at a code:
+# 1 in 20,000 for a 6-digit code. Pairing as a whole is never paused; the price is that a guesser can burn live codes.
+PAIR_WINDOW_S, PAIR_CLIENT_FAILS, PAIR_CODE_FAILS = 600, 20, 50
 MAX_SPEED_MPS = 70  # 250 km/h: faster than any ambulance on Bangladesh roads
 JUMP_SLACK_M = 1000  # GPS and cell-fix noise on top of the reported accuracies
 JUMP_WINDOW_S = 600  # only compare with a recent fix, so one bad accepted fix cannot block real ones for long
@@ -713,7 +714,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             code = f"{secrets.randbelow(10 ** 6):06d}"
             if not db.execute("SELECT 1 FROM pairing_codes WHERE code_hash=?", (hash_token(code),)).fetchone():
                 break
-        db.execute("INSERT INTO pairing_codes (user_id,code_hash,expires_at) VALUES (?,?,?)",  # `failures` is unused
+        db.execute("INSERT INTO pairing_codes (user_id,code_hash,expires_at) VALUES (?,?,?)",
                    (uid, hash_token(code), exp))
         auth_audit(db, u["id"], uid, "pairing_code")
         db.commit()
@@ -721,22 +722,20 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.post("/pair")
     def pair(body: PairIn, request: Request, db: Conn = Depends(get_db)):
-        # No auth on purpose: the one-time code is the credential. Guessing is capped per client and globally (above).
+        # No auth on purpose: the one-time code is the credential. Guessing is capped per client and per code (above).
         client = f"pair:{request.client.host if request.client else '-'}"
         if rate_over(db, client, PAIR_CLIENT_FAILS, PAIR_WINDOW_S):
             raise HTTPException(429, "too many wrong codes from here, wait 10 minutes")
-        if rate_over(db, "pair-all", PAIR_GLOBAL_FAILS, PAIR_WINDOW_S):
-            raise HTTPException(429, "too many wrong codes, pairing paused for up to 10 minutes")
         t, h = now(), hash_token(body.code)
         row = db.execute("SELECT user_id FROM pairing_codes WHERE code_hash=? AND expires_at>?", (h, t)).fetchone()
         # shortcut: unsalted sha256 of a 6-digit code is reversible from a DB dump; fine while codes live 10 minutes.
         if not row or db.execute("DELETE FROM pairing_codes WHERE code_hash=?", (h,)).rowcount != 1:
             db.rollback()
             rate_hit(db, client)
-            rate_hit(db, "pair-all")
+            db.execute("UPDATE pairing_codes SET failures=failures+1 WHERE expires_at>?", (t,))
+            if db.execute("DELETE FROM pairing_codes WHERE failures>=?", (PAIR_CODE_FAILS,)).rowcount:
+                logging.warning("pairing code(s) deleted after %d wrong guesses", PAIR_CODE_FAILS)
             db.commit()
-            if rate_over(db, "pair-all", PAIR_GLOBAL_FAILS, PAIR_WINDOW_S):
-                logging.warning("pairing paused: %d wrong codes in 10 minutes from all clients", PAIR_GLOBAL_FAILS)
             raise HTTPException(401, "invalid or expired code")
         db.execute("DELETE FROM rate_events WHERE bucket=?", (client,))  # committed with the token below
         tok = new_token(db, row["user_id"], row["user_id"], reenable=True, action="pair")  # commits the DELETE too

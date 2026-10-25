@@ -39,9 +39,9 @@ paths:
       summary: Exchange a 6-digit pairing code for a driver token (no auth; the one-time code is the credential)
       description: >
         Rotates the driver's token (the old one stops working) and re-enables a revoked driver. Bangla digits are
-        accepted. A wrong code never kills other codes. One client (IP address) gets 20 wrong codes per 10 minutes, and
-        a success clears its count; all clients together get 50 per 10 minutes, so at most 50 guesses fall in a
-        code's 10-minute life.
+        accepted. One client (IP address) gets 20 wrong codes per 10 minutes, and a success clears its count. Every wrong
+        guess also counts against each live code, which is deleted after 50, so at most 50 guesses fall on a code.
+        Pairing is never paused for everyone; a guesser can only burn live codes, and an admin issues a new one.
       operationId: pair
       requestBody:
         required: true
@@ -50,7 +50,7 @@ paths:
         '200': {description: Paired; token shown once., content: {application/json: {schema: {$ref: '#/components/schemas/PairResult'}}}}
         '401': {description: "Wrong, used or expired code."}
         '422': {description: Not 6 digits.}
-        '429': {description: "Too many wrong codes from this client, or from all clients (pairing paused for up to 10 minutes)."}
+        '429': {description: "Too many wrong codes from this client (wait up to 10 minutes). A code that takes 50 wrong guesses is deleted; the next attempt with it gets 401 and an admin issues a new one."}
 
   /missions:
     get:

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.main import PAIR_CLIENT_FAILS, PAIR_CODE_TTL, PAIR_GLOBAL_FAILS, PAIR_WINDOW_S
+from app.main import PAIR_CLIENT_FAILS, PAIR_CODE_TTL, PAIR_CODE_FAILS, PAIR_WINDOW_S
 from tests.test_api import env, iso, mk  # noqa: F401
 
 
@@ -239,14 +239,21 @@ def test_n4_one_office_ip_survives_onboarding_day_typos(env):
     assert office.post("/pair", json={"code": code}).status_code == 200
 
 
-def test_n4_global_cap_keeps_guessing_infeasible(env):
-    code = code_for(env, env["drv"])
-    for i, w in enumerate(wrong_codes(PAIR_GLOBAL_FAILS, code)):  # a distributed guesser: one try per address
+def test_n4_per_code_cap_keeps_guessing_infeasible(env):
+    code, other = code_for(env, env["drv"]), code_for(env, env["drv2"])
+    for i, w in enumerate(wrong_codes(PAIR_CODE_FAILS, code, other)):  # a distributed guesser: one try per address
         assert phone(env, f"192.0.2.{i}").post("/pair", json={"code": w}).status_code == 401
-    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 429  # paused for everyone
-    env["db"].execute("UPDATE rate_events SET at=at-?", (PAIR_WINDOW_S + 1,)); env["db"].commit()
-    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 200  # paused, never killed
-    # The numbers: a code lives no longer than one window, so at most PAIR_GLOBAL_FAILS guesses can hit it.
+    # Both live codes took PAIR_CODE_FAILS wrong guesses and are dead, even when right; pairing itself is not paused.
+    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 401
+    assert phone(env, "192.0.2.250").post("/pair", json={"code": other}).status_code == 401
+    fresh = code_for(env, env["drv"])
+    assert phone(env, "192.0.2.251").post("/pair", json={"code": fresh}).status_code == 200  # a new code works at once
+    # One short of the cap leaves a code alive.
+    c3 = code_for(env, env["drv2"])
+    for i, w in enumerate(wrong_codes(PAIR_CODE_FAILS - 1, c3)):
+        phone(env, f"198.18.0.{i}").post("/pair", json={"code": w})
+    assert phone(env, "198.18.1.1").post("/pair", json={"code": c3}).status_code == 200
+    # The numbers: a code lives no longer than one window and takes at most PAIR_CODE_FAILS guesses.
     assert PAIR_CODE_TTL.total_seconds() <= PAIR_WINDOW_S
-    assert PAIR_GLOBAL_FAILS / 10 ** 6 <= 1 / 20_000  # chance that a guesser takes over a given code
+    assert PAIR_CODE_FAILS / 10 ** 6 <= 1 / 20_000  # chance that a guesser takes over a given code
     assert PAIR_CLIENT_FAILS >= 15  # an onboarding room gets more typos than it has drivers
