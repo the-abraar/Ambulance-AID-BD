@@ -348,9 +348,16 @@ $("map-search-input").onkeydown = (e) => {
   if (e.key === "Enter") { e.preventDefault(); $("map-search-btn").click(); }
 };
 
-$("btn-reports").onclick = async () => {
+// Report range: optional Dhaka days from the dialog's date inputs; both empty = all missions.
+function reportQuery() {
+  const q = new URLSearchParams();
+  if ($("report-from").value) q.set("start_date", $("report-from").value);
+  if ($("report-to").value) q.set("end_date", $("report-to").value);
+  return q;
+}
+async function loadReport() {
   try {
-    const data = await api("GET", "/reports/response-times");
+    const data = await api("GET", "/reports/response-times?" + reportQuery());
     const tbody = $("reports-table").tBodies[0];
     const s = data.summary || {};
     const fmt = (v, unit) => (v != null ? `${v} ${unit}` : "-");
@@ -363,7 +370,10 @@ $("btn-reports").onclick = async () => {
     tbody.replaceChildren(...rows.map((r) => h("tr", {}, ...r.map((c) => td(String(c))))));
     $("reports-dlg").showModal();
   } catch (err) { /* toast shown */ }
-};
+}
+$("btn-reports").onclick = loadReport;
+$("report-from").onchange = $("report-to").onchange = loadReport;
+$("reports-dlg").onkeydown = (e) => { if (e.key === "Enter" && e.target.type === "date") e.preventDefault(); }; // not close
 $("btn-authlog").onclick = async () => {
   try {
     const rows = await api("GET", "/auth-audit?limit=200");
@@ -374,7 +384,8 @@ $("btn-authlog").onclick = async () => {
 };
 $("btn-export-csv").onclick = async () => {
   try {
-    const res = await fetch("/reports/response-times?format=csv", {
+    const q = reportQuery(); q.set("format", "csv");
+    const res = await fetch("/reports/response-times?" + q, {
       headers: { Authorization: "Bearer " + token }
     });
     if (!res.ok) throw new Error("HTTP " + res.status);

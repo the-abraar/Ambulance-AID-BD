@@ -110,6 +110,8 @@
 <dialog id="reports-dlg" aria-labelledby="reports-h">
   <form method="dialog">
     <h2 id="reports-h">Response times</h2>
+    <p><label>From <input type="date" id="report-from"></label> <label>To <input type="date" id="report-to"></label>
+      (Dhaka days; empty = all)</p>
     <p><button type="button" id="btn-export-csv">Export CSV</button></p>
     <table id="reports-table">
       <thead><tr><th>Metric</th><th>Count</th><th>Median</th><th>P90</th><th>Min</th><th>Max</th></tr></thead>

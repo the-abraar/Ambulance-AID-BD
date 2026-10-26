@@ -387,6 +387,17 @@ def run(base, dtok, ctok):
         shot(dis, "console_1280_dispatcher.png", "console 1280x800, plain dispatcher: drivers list without admin actions")
         close(dis)
 
+        # response-time report: the date range filters the table and the CSV
+        counts = "[...document.querySelectorAll('#reports-table tbody tr')].map(r=>+r.cells[1].textContent)"
+        con.click("#btn-reports"); con.wait_for_selector("#reports-dlg[open]")
+        ok(sum(con.evaluate(counts)) > 0, "report dialog: all missions when no dates are set")
+        con.fill("#report-to", "2000-01-01")
+        wait(con, f"{counts}.every(c=>c===0)")
+        with con.expect_request("**/reports/response-times?*format=csv*") as req:
+            con.click("#btn-export-csv")
+        ok("end_date=2000-01-01" in req.value.url, "report date range filters the table and the CSV export")
+        con.fill("#report-to", ""); con.click("#reports-dlg button[value=close]")
+
         # map states and token-expiry list from fixtures shaped like the real responses
         rv, rd = api(base, dtok, "/vehicles")[0], api(base, dtok, "/drivers")[0]
         soon = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
