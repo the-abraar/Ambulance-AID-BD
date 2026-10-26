@@ -391,3 +391,9 @@ Agent-made on `main`, local commits only (not pushed, not human-reviewed). `scri
 - **Gap 5 partly:** `GET /auth-audit` and a console "Auth log" dialog, admin only, read-only, newest 200. Tokens still live in `localStorage`.
 
 **Skipped:** encrypted offsite backups (needs the owner's key and host), caller phone field (counsel), console date range for the report, plus all non-code gaps (demand, hosting, review, counsel).
+
+**2026-10-27, agent (local commits on `main`, not pushed):** finished items 4-6. Bugs 1-3, the call button, the per-code pairing limit and the auth log were already done on 2026-10-25; re-checked by `scripts/check.sh` and the browser e2e.
+- **Item 4 done:** the report dialog has From/To date inputs (Dhaka days) that filter the table and the CSV export; new e2e checks cover it.
+- **Item 6 done in code:** every dump is encrypted with gpg AES-256 from `BACKUP_PASSPHRASE` (required; placeholder or under 24 characters refused). `ops/restore.sh` decrypts. An optional `offsite` service (compose profile, rclone) copies only `*.dump.gpg` to `BACKUP_OFFSITE` nightly and deletes copies there after 15 days. Checked in a throwaway compose project with a local folder as the remote: dump encrypted, copied, restore drill OK, wrong passphrase refused (`docs/deploy.md`, fourth run). Not run: `--live` on an encrypted dump, a real remote, the timers.
+- **Checks:** `scripts/check.sh` exit 0 (184 passed, 1 skipped, both orders, SQLite only). Browser e2e: 135/135 only after relaxing one wait in a scratch copy. Unchanged code fails it at "map draws the accuracy circle" (`#map path.veh-busy` stays hidden, Leaflet draws `d="M0 0"`). It fails the same way at `5aa1b4f`, so this round did not cause it. Not investigated.
+- **Skipped:** the offsite storage account and its region (owner and counsel), the caller-phone field (counsel), Postgres test run, and all non-code gaps.
