@@ -57,7 +57,7 @@ services:
       start_period: 20s
     depends_on:
       migrate: {condition: service_completed_successfully}
-  backup:  # nightly pg_dump into ./backups, newest 14 kept (ops/backup.sh); restore with ops/restore.sh
+  backup:  # nightly encrypted pg_dump into ./backups, newest 14 kept (ops/backup.sh); restore with ops/restore.sh
     image: postgres:16
     restart: unless-stopped
     entrypoint: [bash, /ops/backup.sh]
@@ -66,9 +66,18 @@ services:
       PGUSER: postgres
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ambulance
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE in .env}
     volumes: [./ops:/ops:ro, ./backups:/backups]
     depends_on:
       migrate: {condition: service_completed_successfully}  # so the first dump already has the schema
+  offsite:  # only with COMPOSE_PROFILES=offsite: nightly copy of the encrypted dumps to BACKUP_OFFSITE (ops/offsite.sh)
+    image: rclone/rclone:1.68
+    profiles: [offsite]
+    restart: unless-stopped
+    entrypoint: [sh, /ops/offsite.sh]
+    environment:
+      BACKUP_OFFSITE: ${BACKUP_OFFSITE:-}
+    volumes: [./ops:/ops:ro, ./backups:/backups:ro, ./rclone.conf:/config/rclone/rclone.conf:ro]
   caddy:
     image: caddy:2
     restart: unless-stopped

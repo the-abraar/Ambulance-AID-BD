@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Restore a dump from backups/ into a scratch database and print its row counts. Live data is untouched (the drill).
 # With --live it then swaps the restored copy in as `ambulance` and keeps the old one as `ambulance_before_restore`.
-#   ops/restore.sh backups/ambulance-2026-10-14.dump           # drill
-#   ops/restore.sh backups/ambulance-2026-10-14.dump --live    # real restore; asks first, stops app and backup meanwhile
+# A .gpg dump is decrypted in a throwaway `backup` container with BACKUP_PASSPHRASE from .env; a plain .dump is read as is.
+#   ops/restore.sh backups/ambulance-2026-10-14.dump.gpg           # drill
+#   ops/restore.sh backups/ambulance-2026-10-14.dump.gpg --live    # real restore; asks first, stops app and backup meanwhile
 set -euo pipefail
 cd "$(dirname "$0")/.."
-f="${1:?usage: ops/restore.sh backups/FILE.dump [--live]}"
+f="${1:?usage: ops/restore.sh backups/FILE.dump.gpg [--live]}"
 [ -s "$f" ] || { echo "missing or empty: $f" >&2; exit 1; }
 sql() { docker compose exec -T db psql -U postgres -v ON_ERROR_STOP=1 -qAt "$@" </dev/null; }  # keep stdin for the prompt
 
 sql -d postgres -c 'DROP DATABASE IF EXISTS restore_drill' -c 'CREATE DATABASE restore_drill'
-docker compose exec -T db pg_restore -U postgres -d restore_drill --single-transaction < "$f"
+case "$f" in
+  *.gpg) dec() { docker compose run --rm --no-deps -T --entrypoint bash backup -c \
+    'gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --decrypt 3<<<"$BACKUP_PASSPHRASE"'; };;
+  *) dec() { cat; };;
+esac
+dec < "$f" | docker compose exec -T db pg_restore -U postgres -d restore_drill --single-transaction
 echo "rows per table in $f:"
 sql -d restore_drill -F ' ' -c "SELECT table_name, (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I',
   table_name), false, true, '')))[1] FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1"

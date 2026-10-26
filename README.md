@@ -16,7 +16,7 @@
 - No signal integration or signal-control code of any kind.
 - No partners, no pilot LOI, no government engagement, no legal opinion.
 - No field testing, no real vehicles, no real users. The driver app and the Android wrapper have never run on a real phone; the web page alone is expected to lose GPS when the screen is off or Maps is open, which is why the wrapper exists.
-- Not hosted anywhere. No offsite backups, monitoring or alerting. PostGIS not used.
+- Not hosted anywhere. No offsite storage account (the encrypted offsite copy is built, never run against a real remote), monitoring or alerting. PostGIS not used.
 - No measured baseline data. Impact figures in the architecture docs are unsourced estimates (see labels in those docs).
 
 ## Current phase: the wedge MVP

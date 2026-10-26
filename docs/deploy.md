@@ -7,13 +7,14 @@ Status: run end to end on a laptop on 2026-10-14 (results below). Never run on a
 | `db` | postgres:16 | Data. Refuses to start with the `.env.example` placeholders or weak passwords. Not published on a host port. |
 | `migrate` | app image, one-shot | As the owner (`postgres`): runs migrations, then (re)creates the app's role `ambulance_app` with least privilege (`ops/migrate.py`). |
 | `app` | app image (`backend/Dockerfile`, hashed deps from `backend/requirements.lock`) | Connects as `ambulance_app`, not a superuser. Starts only after `migrate` succeeds. Health check: `GET /healthz`. Trusts Caddy's `X-Forwarded-For` (`FORWARDED_ALLOW_IPS`), so per-client limits see the phone's IP. |
-| `backup` | postgres:16 | `pg_dump` at start and nightly at 20:00 UTC (02:00 Dhaka) into `./backups/`, newest 14 kept (`ops/backup.sh`). |
+| `backup` | postgres:16 | `pg_dump` at start and nightly at 20:00 UTC (02:00 Dhaka), encrypted with `BACKUP_PASSPHRASE`, into `./backups/`, newest 14 kept (`ops/backup.sh`). |
+| `offsite` | rclone/rclone:1.68 | Off unless `COMPOSE_PROFILES=offsite`. Copies the encrypted dumps to `BACKUP_OFFSITE` at start and nightly at 20:30 UTC (`ops/offsite.sh`). |
 | `caddy` | caddy:2 | TLS, security headers, gzip/zstd, 64 KB body cap, upstream health check. Starts after `app` is healthy. |
 
 ## First deploy
 
 1. Point DNS for your domain at the host; open ports 80 and 443. HTTPS is required: phone GPS does not work over plain HTTP.
-2. `cp .env.example .env`, set `DOMAIN`, and replace both passwords with `openssl rand -hex 32`. Compose refuses to start when a password is empty, still a `change-me` placeholder, shorter than 24 characters, or contains anything but letters and digits (they go into connection URLs unescaped).
+2. `cp .env.example .env`, set `DOMAIN`, and replace both passwords and `BACKUP_PASSPHRASE` with `openssl rand -hex 32`. Store `BACKUP_PASSPHRASE` off this host too (a password manager): without it no dump can be restored, and a lost host takes `.env` with it. Compose refuses to start when a password is empty, still a `change-me` placeholder, shorter than 24 characters, or contains anything but letters and digits (they go into connection URLs unescaped).
 3. `docker compose up -d --build`. Order: `db` healthy, then `migrate` runs and exits 0, then `app` and `backup` start, then `caddy` once `app` is healthy.
 4. Create the first admin (the token is printed once): `docker compose run --rm app python -m app.bootstrap admin NAME`. Give the dispatch desk dispatch-only accounts (`bootstrap dispatcher NAME`, or `POST /users` as admin). A stolen token: `docker compose run --rm app python -m app.bootstrap revoke USER_ID`.
    - Optional SMS fallback to drivers: set `AMBULANCE_SMS_API_KEY` and `AMBULANCE_SMS_SENDER_ID` in `.env` (see `backend/README.md`), then `docker compose up -d`.
@@ -42,21 +43,28 @@ Updating: `docker compose restart backup` takes a fresh dump; wait for its `back
 
 ## Backups
 
-- Files: `backups/ambulance-YYYY-MM-DD.dump` (pg_dump custom format). The newest 14 are kept. A same-day rerun replaces that day's file.
+- Files: `backups/ambulance-YYYY-MM-DD.dump.gpg` (pg_dump custom format, encrypted with gpg AES-256 from `BACKUP_PASSPHRASE`; the plain dump never touches the disk). The newest 14 are kept, counting any older unencrypted `.dump` files, which age out the same way. A same-day rerun replaces that day's file.
+- `backup` refuses to start when `BACKUP_PASSPHRASE` is a `change-me` placeholder or shorter than 24 characters; compose refuses to start at all when it is unset.
+- Decrypt by hand (any machine with gpg): `gpg --decrypt backups/FILE.dump.gpg > FILE.dump`.
 - Failures appear only in the logs: `docker compose logs backup | grep FAILED`.
 - Deleted GPS pings (90-day retention) can survive in these dumps for up to 14 more days. `docs/pilot-plan.md` section 3 says so.
-- **OWNER TODO: offsite copy.** The dumps sit on the same disk as the database, so losing the host loses both. Choose offsite storage (provider, account, region; whether it may be outside Bangladesh is a question for counsel, see `docs/pilot-plan.md` section 3), encrypt the copies, and copy `backups/` there nightly after 20:30 UTC. Until then this is not a backup against host loss.
+- **Offsite copy** (the code is ready; the storage account is an OWNER TODO). Until it runs, the dumps sit on the same disk as the database, so losing the host loses both.
+  1. Choose storage with access keys, not a browser login (an S3-compatible bucket, Backblaze B2, or SFTP on another machine). Provider, account and region are the owner's call; whether it may be outside Bangladesh is a question for counsel (`docs/pilot-plan.md` section 3). Give the key write and delete rights on one bucket or folder only.
+  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work.
+  3. In `.env`: `BACKUP_OFFSITE=REMOTE:bucket/ambulance` and `COMPOSE_PROFILES=offsite`. Then `docker compose up -d`.
+  4. `docker compose logs offsite` shows `offsite ok: N dumps at ...` or `OFFSITE FAILED`. Copies older than 15 days are deleted there, so offsite keeps about the same 14 days as the host.
+  5. Only `*.dump.gpg` files leave the host. To restore from offsite on a new host: `docker run --rm -v "$PWD:/config/rclone" -v "$PWD/backups:/backups" rclone/rclone:1.68 copy REMOTE:bucket/ambulance /backups`, then the restore below.
 
 ## Restore drill (monthly, and after any change to `ops/` or `docker-compose.yml`)
 
-1. `ops/restore.sh backups/ambulance-YYYY-MM-DD.dump` (the newest file).
+1. `ops/restore.sh backups/ambulance-YYYY-MM-DD.dump.gpg` (the newest file). It decrypts with `BACKUP_PASSPHRASE` from `.env`; a wrong passphrase stops it with "decryption failed".
    - It loads the dump into a scratch database `restore_drill`, prints the row count of every table, and drops the scratch database.
    - Live data is untouched.
 2. Check the counts are plausible: `missions` and `mission_audit` close to what the console shows, `alembic_version` 1.
 3. Write the date and the result in the "Verified" section below.
 
 **Real restore** (data lost or corrupted):
-- Run `ops/restore.sh backups/FILE.dump --live` and type `RESTORE` when asked.
+- Run `ops/restore.sh backups/FILE.dump.gpg --live` and type `RESTORE` when asked.
 - The script first does the drill steps. It then stops `app` and `backup` and renames the live database to `ambulance_before_restore`. The restored copy becomes `ambulance`. `docker compose up -d` then upgrades the schema if needed and re-applies the grants.
 - Check the console. Then drop the old copy with the command the script prints.
 - On a new host, run `docker compose up -d` once before restoring, so that the `ambulance_app` role exists.
@@ -100,6 +108,8 @@ The first run used a backend from before amb-api's round, with a stand-in `/heal
 
 Third run, 2026-10-15: `main` at `eea84a7`, then with the chunked-body cap. The image built, `migrate` exited 0, `app` turned healthy, and `/healthz` through Caddy returned 200 `{"ok":true}`. A 70 KB chunked POST sent straight to the app (no Content-Length, past Caddy) returned 413. `docker compose down -v` cleaned up.
 
+Fourth run, 2026-10-27 (encrypted dumps and offsite copy; throwaway project, `BACKUP_OFFSITE` set to a local folder, `rclone.conf` empty): `backup` wrote `ambulance-DATE.dump.gpg` (gpg symmetric packet, no plain dump on disk). `offsite` logged `offsite ok: 1 dumps` and the folder held the same file. After `bootstrap admin`, `docker compose restart backup` and the drill on the `.gpg` file printed `users 1` and "drill OK". With a wrong passphrase the drill stopped with "decryption failed: Bad session key". A `change-me` passphrase made `backup` refuse to start. Not run: `--live` on an encrypted dump, a real offsite remote, the 20:30 UTC timer, the 15-day offsite delete.
+
 Not checked:
 - a real host, DNS, or a Let's Encrypt certificate
 - the 20:00 UTC timer firing
@@ -111,4 +121,4 @@ Not checked:
 
 - **OWNER TODO: hosting account and host.** Choose the provider and region; in-country hosting is an open question for counsel.
 - **OWNER TODO: uptime alert to the owner's phone.** Use an external check of `https://DOMAIN/healthz`.
-- Offsite backups (above), log shipping, error tracking, a staging copy, rate limiting at the proxy, and tagged images for rollback.
+- A real offsite storage account (above), log shipping, error tracking, a staging copy, rate limiting at the proxy, and tagged images for rollback.

@@ -20,3 +20,5 @@ build/
 backend/tests/shots/
 # Nightly database dumps (docker compose backup service)
 backups/
+# Offsite storage credentials (rclone config, docs/deploy.md)
+rclone.conf
