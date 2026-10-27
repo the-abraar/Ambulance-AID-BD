@@ -330,10 +330,12 @@ $("map-search-btn").onclick = async () => {
     const data = await r.json();
     if (seq !== searchSeq) return;
     if (!data || !data.length) { toast("No location found for: " + q); return; }
-    map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 15);
+    // No animation: Leaflet ignores a setView during a zoom animation and then snaps back to its target, so a quick
+    // pick (within 250 ms) would leave the map on this first match instead of the picked place.
+    map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 15, { animate: false });
     list.append(...data.map((d) => h("li", {}, btn(d.display_name, () => {
       const lat = parseFloat(d.lat), lng = parseFloat(d.lon);
-      map.setView([lat, lng], 15);
+      map.setView([lat, lng], 15, { animate: false });
       setPickup({ lat, lng });
       const addr = document.querySelector('input[name="addr"]');
       if (addr && !addr.value.trim()) addr.value = d.display_name.slice(0, addr.maxLength); // the dispatcher need not type it twice

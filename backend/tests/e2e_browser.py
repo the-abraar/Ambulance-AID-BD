@@ -206,6 +206,9 @@ def run(base, dtok, ctok):
         con.route("https://nominatim.openstreetmap.org/**", lambda r: r.fulfill(status=429, body="slow down"))
         con.fill("#map-search-input", "Gulshan"); con.press("#map-search-input", "Enter")
         wait(con, "document.getElementById('toasts').textContent.includes('Search unavailable')")
+        con.wait_for_timeout(400)  # longer than a Leaflet zoom animation, which would snap the map back to the first match
+        ok(con.evaluate("[map.getCenter().lat, map.getCenter().lng]") == [23.7104, 90.4074],
+           "the map stays on the picked match (a quick pick is not undone by the search's own pan)")
         con.evaluate("map.setView(DHAKA_CENTRE, 12)")  # back to the start view: later checks need the vehicles on screen
 
         con.fill("#newv [name=operator]", "RedCrescent"); con.fill("#newv [name=registration]", "DHK-E2E")
