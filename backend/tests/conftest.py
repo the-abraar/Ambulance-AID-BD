@@ -45,9 +45,16 @@ def target(tmp_path):
 
 def app_role_url(owner_url: str) -> str:
     """Migrate and grant as the owner with the real ops/migrate.py, then hand the test ambulance_app's URL."""
+    import psycopg
+    with psycopg.connect(owner_url) as c:  # ambulance_app is cluster-wide: never reset the password of a real install
+        other = [r[0] for r in c.execute("SELECT datname FROM pg_database WHERE datname NOT IN "
+                                         "(current_database(), 'postgres', 'template0', 'template1')")]
+    if other:
+        raise pytest.UsageError(f"{APP_ROLE}=1 resets the cluster-wide ambulance_app role, but this cluster also holds "
+                                f"{other}. Use a throwaway cluster that holds only the test database.")
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("AMBULANCE_DB_PATH", owner_url)
         mp.setenv("APP_DB_PASSWORD", APP_ROLE_PASSWORD)
         runpy.run_path(str(Path(__file__).resolve().parents[2] / "ops/migrate.py"))
     u = urlparse(owner_url)
-    return u._replace(netloc=f"ambulance_app:{APP_ROLE_PASSWORD}@{u.hostname}:{u.port or 5432}").geturl()
+    return u._replace(netloc=f"ambulance_app:{APP_ROLE_PASSWORD}@{u.netloc.rpartition('@')[2]}").geturl()
