@@ -20,3 +20,5 @@ jobs:
         run: |
           pip install -r backend/requirements-dev.txt
           cd backend && TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/ambulance_test pytest
+      - name: pytest on Postgres as the least-privilege ambulance_app role
+        run: cd backend && TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/ambulance_test TEST_DATABASE_APP_ROLE=1 pytest
