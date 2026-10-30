@@ -1,9 +1,13 @@
 import os
+import runpy
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 
 ANY_DB_OVERRIDE = "TEST_DATABASE_ANY_NAME"
+APP_ROLE = "TEST_DATABASE_APP_ROLE"  # =1: tests connect as the least-privilege ambulance_app, like production
+APP_ROLE_PASSWORD = "test-only-app-role-password"
 
 
 def check_test_db_url(url: str, env=os.environ) -> None:
@@ -34,4 +38,16 @@ def target(tmp_path):
                   "WHERE datname=current_database() AND pid<>pg_backend_pid()")
         c.execute("DROP SCHEMA public CASCADE")
         c.execute("CREATE SCHEMA public")
+    if os.environ.get(APP_ROLE) == "1":
+        return app_role_url(url)
     return url
+
+
+def app_role_url(owner_url: str) -> str:
+    """Migrate and grant as the owner with the real ops/migrate.py, then hand the test ambulance_app's URL."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("AMBULANCE_DB_PATH", owner_url)
+        mp.setenv("APP_DB_PASSWORD", APP_ROLE_PASSWORD)
+        runpy.run_path(str(Path(__file__).resolve().parents[2] / "ops/migrate.py"))
+    u = urlparse(owner_url)
+    return u._replace(netloc=f"ambulance_app:{APP_ROLE_PASSWORD}@{u.hostname}:{u.port or 5432}").geturl()
