@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import bd_phone, create_app
+from app.main import DHAKA as DHAKA_TZ, bd_phone, create_app
 from tests.test_api import DHAKA, env, free, iso, mk  # noqa: F401
 
 
@@ -330,7 +330,7 @@ def test_response_times_report(env):
     assert s["ack_to_scene_m"]["median"] == 12.0
     assert s["scene_to_hospital_m"]["median"] == 30.0
     assert s["total_turnaround_m"]["median"] == 60.0
-    day = r.json()["created_at"][:10]
+    day = datetime.fromisoformat(r.json()["created_at"]).astimezone(DHAKA_TZ).date().isoformat()  # report days are Dhaka days
     assert c.get(f"/reports/response-times?end_date={day}", headers=D).json()["summary"]["total_missions"] == 1
     assert c.get(f"/reports/response-times?start_date={day}&end_date={day}",
                  headers=D).json()["summary"]["total_missions"] == 1  # end_date includes its whole day
