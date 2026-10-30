@@ -404,3 +404,10 @@ Agent-made on `main`, local commits only (not pushed, not human-reviewed). `scri
 - **Compose smoke (project `aab`, Caddy on 127.0.0.1:58443, `DOMAIN=localhost`, scratch copy of HEAD, random secrets):** built, `migrate` exit 0, all services healthy. Through Caddy: `/healthz` 200, console with the CSP header, `/docs` 404, `bootstrap admin`, then vehicle, driver, pairing code, `POST /pair`, mission, ack, ping, every status to COMPLETED, 6 audit rows, report counts 1, `/auth-audit` 200. The backup service wrote an encrypted `.dump.gpg`. No errors in the app log. Torn down with `down -v`.
 - **Checks:** `scripts/check.sh` exit 0 (184 passed, 1 skipped, both orders, SQLite).
 - **Still unverified:** the restore drill on this run's dump, a real host and certificate, a real phone, and every non-code gap above.
+
+## Update 9 (2026-10-30, agent round)
+
+Agent-made, merged through GitHub PRs (not human-reviewed). Score unchanged: nothing here moves the cap.
+- **Tests as `ambulance_app` (issue #1):** `TEST_DATABASE_APP_ROLE=1` makes the Postgres fixture migrate and grant as the owner with the real `ops/migrate.py`, then run each test as `ambulance_app`. Full suite on Postgres 16 as `ambulance_app`: 186 passed, forward; 185 passed in reverse before the guard test was added. A guard test asserts the connection is `ambulance_app` and not a superuser. CI now runs the Postgres suite as owner and as `ambulance_app`. No app code needed a change: every endpoint works within the production grants.
+- **Clock-dependent test fixed:** `test_response_times_report` took the mission's UTC date as the report day, but the report counts Dhaka days, so it failed between 00:00 and 03:00 UTC on every backend (seen at 01:48 UTC). It now uses the Dhaka day.
+- **Checks:** `scripts/check.sh` exit 0 (184 passed, 2 skipped, both orders, SQLite); Postgres as owner 185 passed, 1 skipped.
