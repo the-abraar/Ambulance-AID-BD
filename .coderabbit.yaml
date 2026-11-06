@@ -1,0 +1,12 @@
+reviews:
+  profile: assertive
+  path_instructions:
+    - path: "backend/**/*.py"
+      instructions: |
+        Emergency-response backend; correctness and availability matter. Check input validation, auth/authorization, secrets in code, and error handling. Flag blocking calls in async paths.
+    - path: "{docker-compose.yml,Caddyfile,ops/**}"
+      instructions: |
+        Deployment config. Flag exposed ports, default credentials, and missing restarts/healthchecks.
+
+tone_instructions: |
+  Be concise, direct, and constructive.
