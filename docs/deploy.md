@@ -45,6 +45,8 @@ Updating: `docker compose restart backup` takes a fresh dump; wait for its `back
 
 Do this before step 1 of the first deploy (Ubuntu commands; adapt for other systems).
 
+- **Docker:** Docker Engine 25 or newer with the Compose plugin (`docker version`, `docker compose version`). The health checks use `start_interval`, which older engines reject.
+
 - **Firewall:** only SSH, HTTP and HTTPS.
   - `ufw default deny incoming && ufw default allow outgoing && ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw enable`
   - Docker writes its own iptables rules for published ports and bypasses UFW. That is why only `caddy` publishes ports. Never add `ports:` to `db` or `app`.
@@ -85,9 +87,10 @@ Do this before step 1 of the first deploy (Ubuntu commands; adapt for other syst
 - Deleted GPS pings (90-day retention) can survive in these dumps for up to 14 more days. `docs/pilot-plan.md` section 3 says so.
 - **Offsite copy** (step 6 of the first deploy). Until it runs, the dumps sit on the same disk as the database, so losing the host loses both.
   1. Choose storage with access keys, not a browser login (an S3-compatible bucket, Backblaze B2, or SFTP on another machine). Provider, account and region are the owner's call; whether it may be outside Bangladesh is a question for counsel (`docs/pilot-plan.md` section 3).
-     - Preferred: a bucket with object lock (or versioning) and a 14-day lifecycle rule that deletes old copies, and a key that can write new files but not delete or overwrite them. A stolen host key then cannot wipe or replace the offsite copies. With this setup, delete the `rclone delete` line in `ops/offsite.sh`: the bucket enforces the 14 days.
+     - Preferred: a bucket with object lock (or versioning) and a 14-day lifecycle rule that deletes old copies, and a key that can write new files but not delete or overwrite them. A stolen host key then cannot wipe or replace the offsite copies. With this setup, the bucket enforces the 14 days, so in `ops/offsite.sh` replace the two lines from `if rclone copy` through `--min-age 14d; then` with this one line (keep the `then` branch below it as is):
+       `if rclone copy /backups "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg'; then`
      - Otherwise: give the key write and delete rights on one bucket or folder only. `ops/offsite.sh` then deletes copies older than 14 days.
-  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work.
+  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work. Make it owned by root and readable only by root: `sudo chown root:root rclone.conf && sudo chmod 600 rclone.conf`. `offsite` runs as root with all capabilities dropped, so it cannot read a 0600 file that belongs to another user, and every run fails with `OFFSITE FAILED`.
   3. In `.env`: `BACKUP_OFFSITE=REMOTE:bucket/ambulance` and `COMPOSE_PROFILES=offsite`. Then `docker compose up -d`.
   4. `docker compose logs offsite` shows `offsite ok: N dumps at ...` or `OFFSITE FAILED`, and `docker compose ps offsite` shows `healthy`. Copies older than 14 days are deleted there, the same as on the host. Add `offsite` to the alert's list of services.
   5. Only `*.dump.gpg` files leave the host. To restore from offsite on a new host: `docker run --rm -v "$PWD:/config/rclone" -v "$PWD/backups:/backups" rclone/rclone:1.68 copy REMOTE:bucket/ambulance /backups`, then the restore below.
