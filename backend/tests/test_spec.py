@@ -84,3 +84,15 @@ def test_every_route_in_spec_and_back(env):  # noqa: F811
     app_ops = {(norm(r.path), m.lower()) for r in env["app"].routes if isinstance(r, APIRoute) for m in r.methods}
     spec_ops = {(norm(p), m) for p, ops in SPEC["paths"].items() for m in ops if m in ("get", "post", "put", "patch", "delete")}
     assert app_ops == spec_ops
+
+
+def test_request_rules_match_spec(env):  # noqa: F811
+    """additionalProperties: false and query enums in the spec are enforced, not just documented."""
+    c, D = env["c"], env["D"]
+    assert c.patch(f"/vehicles/{env['veh']}", json={"active": True, "junk": 1}, headers=D).status_code == 422
+    for f in ("xml", "CSV"):
+        assert c.get(f"/reports/response-times?format={f}", headers=D).status_code == 422
+    assert c.get("/reports/response-times?format=csv", headers=D).headers["content-type"].startswith("text/csv")
+    patch = SPEC["paths"]["/vehicles/{vehicleId}"]["patch"]["requestBody"]["content"]["application/json"]["schema"]
+    fmt = next(p for p in SPEC["paths"]["/reports/response-times"]["get"]["parameters"] if p["name"] == "format")
+    assert patch["additionalProperties"] is False and fmt["schema"]["enum"] == ["json", "csv"]

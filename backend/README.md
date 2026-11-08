@@ -75,7 +75,12 @@ dispatch desk, and keep admin tokens off shared PCs. If an admin token is stolen
   only from the driver paired with the vehicle, only while the vehicle is in service and neither it nor he is on
   another mission. The server keeps one position per 30 s and answers the rest 201 with `stored: false`. Unpaired,
   off shift or signed out: nothing is kept. `GET /me` gives a driver `paired_vehicle_id`.
-- Creates (missions, drivers, users): 30 per minute per token.
+- Creates (missions, drivers, users): 30 per minute per token. New users (`POST /users`): also at most 20 a day across
+  all admins (429 past that).
+- Vehicle changes are audited in `auth_audit` (`GET /auth-audit`): `create_vehicle`, `vehicle_active:true|false`,
+  `pair_vehicle:<vehicle id>` (target: the driver) and `pair_vehicle:<vehicle id>:none` (unpaired).
+- `GET /reports/response-times`: `format` is `json` or `csv` (anything else is 422). In the CSV, a registration or
+  operator that starts with `=`, `+`, `-`, `@`, a tab or CR gets a leading `'`, so a spreadsheet shows it as text.
 - Driver phone: `01XXXXXXXXX`, `8801...`, `+8801...`, Bangla digits, spaces and hyphens accepted; stored as
   `+8801XXXXXXXXX`; anything else is 422.
 - Validation errors (422) never echo the request body back.
@@ -90,11 +95,18 @@ text (mission id, address, Google Maps link) through the [BulkSMSBD](https://bul
 delays or fails dispatch. Every attempt, sent or failed, is a row in `sms_audit` (mission, driver, event, result; no
 phone number, no key).
 
+Daily ceiling: in any 24 hours, at most 50 texts go to one phone number and 500 in total (`SMS_PER_NUMBER_DAY`,
+`SMS_TOTAL_DAY` in `app/main.py`). Past either, the text is not sent; the server logs a warning and writes an `sms_audit`
+row with result `skipped: daily cap for this number` or `skipped: daily cap for all numbers`. Skipped rows do not count
+toward the ceiling.
+
 **TODO (owner):**
 1. Open a BulkSMSBD account, top up a balance, and get an API key and an approved sender ID (a masking/brand sender ID
    usually needs BTRC approval, which the gateway arranges; ask them, a non-masking number may do for a pilot).
-2. Put the key and sender ID in the server's environment (never in git).
-3. UNVERIFIED until step 1: that `response_code` 202 means accepted, and that `type=unicode` delivers Bangla
+2. Set a spending limit (or keep a small prepaid balance) on the BulkSMSBD account; the server's daily ceiling above is
+   a second line, not a replacement.
+3. Put the key and sender ID in the server's environment (never in git).
+4. UNVERIFIED until step 1: that `response_code` 202 means accepted, and that `type=unicode` delivers Bangla
    addresses correctly. Send one English and one Bangla test mission to your own phone before relying on it.
 
 ## Doc conflicts (and the choice made)

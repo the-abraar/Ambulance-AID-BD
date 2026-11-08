@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -49,6 +49,9 @@ MAX_SPEED_MPS = 70  # 250 km/h: faster than any ambulance on Bangladesh roads
 JUMP_SLACK_M = 1000  # GPS and cell-fix noise on top of the reported accuracies
 JUMP_WINDOW_S = 600  # only compare with a recent fix, so one bad accepted fix cannot block real ones for long
 BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+# SMS cost and abuse ceiling over any 24 h: texts per phone number and in total. Past it, a text is skipped and logged.
+SMS_PER_NUMBER_DAY, SMS_TOTAL_DAY = 50, 500
+USER_CREATES_PER_DAY = 20  # POST /users across all admins, so a stolen admin token cannot mint tokens without end
 ANDROID_PACKAGE = "bd.ambulanceaid.driver"  # android/app/build.gradle.kts applicationId
 
 
@@ -276,7 +279,19 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                 return
             link = f" https://maps.google.com/?q={m['pickup_lat']},{m['pickup_lng']}" if m["pickup_lat"] is not None else ""
             head = "CANCELLED ambulance mission" if event == "cancel" else "New ambulance mission"
-            result = sms.send_sms(m["phone"], f"{head} {mid[:8]}: {m['pickup_address'][:80]}{link}")
+            # shortcut: count-then-send lets parallel sends past the cap by a few; fine for a daily ceiling.
+            since, tried = now(timedelta(days=-1)), "skipped%"  # skipped rows cost nothing, so they do not count
+            if db.execute("SELECT COUNT(*) FROM sms_audit a JOIN drivers d ON d.id=a.driver_id "
+                          "WHERE d.phone=? AND a.ts>? AND a.result NOT LIKE ?", (m["phone"], since, tried)).fetchone()[0] \
+                    >= SMS_PER_NUMBER_DAY:
+                result = "skipped: daily cap for this number"
+            elif db.execute("SELECT COUNT(*) FROM sms_audit WHERE ts>? AND result NOT LIKE ?",
+                            (since, tried)).fetchone()[0] >= SMS_TOTAL_DAY:
+                result = "skipped: daily cap for all numbers"
+            else:
+                result = sms.send_sms(m["phone"], f"{head} {mid[:8]}: {m['pickup_address'][:80]}{link}")
+            if result.startswith("skipped"):
+                logging.warning("SMS for mission %s %s", mid[:8], result)
             db.execute("INSERT INTO sms_audit (mission_id,driver_id,event,result,ts) VALUES (?,?,?,?,?)",
                        (mid, m["did"], event, result, now()))
             db.commit()
@@ -430,6 +445,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         registration: Text
 
     class VehiclePatch(BaseModel):
+        model_config = ConfigDict(extra="forbid")
         active: bool
 
     class DriverRef(BaseModel):
@@ -482,6 +498,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         # Inactive vehicles (workshop, off shift) cannot be dispatched; a running mission is left alone.
         if db.execute("UPDATE vehicles SET active=? WHERE id=?", (body.active, vid)).rowcount != 1:
             raise HTTPException(404, "unknown vehicle")
+        auth_audit(db, u["id"], vid, f"vehicle_active:{str(body.active).lower()}")
         db.commit()
         return vehicles(db, vid)[0]
 
@@ -497,6 +514,11 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         except IntegrityError:  # another dispatcher paired the same driver at the same moment
             db.rollback()
             raise HTTPException(409, "driver was just paired elsewhere, retry")
+        # pairing decides who gets a vehicle's missions and SMS, so it is audited like credentials
+        if body.driver_id:
+            auth_audit(db, u["id"], driver_user(db, body.driver_id), f"pair_vehicle:{vid}")
+        else:
+            auth_audit(db, u["id"], vid, f"pair_vehicle:{vid}:none")
         db.commit()
         return vehicles(db, vid)[0]
 
@@ -703,6 +725,9 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     def create_user(body: UserIn, u: dict = Depends(admin_only), db: Conn = Depends(get_db)):
         # Dispatchers and admins only; drivers come from POST /drivers because they need a driver record.
         create_limit(db, u)
+        if rate_over(db, "create_user", USER_CREATES_PER_DAY, 86400):
+            raise HTTPException(429, f"at most {USER_CREATES_PER_DAY} new users a day")
+        rate_hit(db, "create_user")
         uid, tok = add_user(db, body.name, "dispatcher", admin=body.admin)
         auth_audit(db, u["id"], uid, "create_user")
         db.commit()
@@ -755,7 +780,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.get("/reports/response-times")
     def response_time_report(start_date: date | None = None, end_date: date | None = None,
-                             vehicle_id: str | None = None, format: str = "json",
+                             vehicle_id: str | None = None, format: Literal["json", "csv"] = "json",
                              u: dict = Depends(dispatcher_only), db: Conn = Depends(get_db)):
         sql = ("SELECT m.id, m.status, m.assigned_vehicle_id, v.registration, v.operator, m.created_at, "
                "m.acknowledged_at, m.en_route_pickup_at, m.at_scene_at, m.at_hospital_at, m.completed_at "
@@ -883,7 +908,9 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
             for v_id, data in sorted(vehicles_map.items(), key=lambda x: x[1]["registration"])
         ]
 
-        if format.lower() == "csv":
+        if format == "csv":
+            # A cell starting with = + - @ tab or CR runs as a formula in Excel/Sheets; a leading ' makes it text.
+            safe = lambda v: "'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
             out_buf = io.StringIO()
             writer = csv.writer(out_buf)
             writer.writerow([
@@ -903,7 +930,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
                 ])
             for v in by_vehicle:
                 writer.writerow([
-                    "ALL", v["vehicle_id"], v["registration"], v["operator"], v["missions_count"],
+                    "ALL", safe(v["vehicle_id"]), safe(v["registration"]), safe(v["operator"]), v["missions_count"],
                     v["dispatch_to_ack_s"]["median"], v["dispatch_to_ack_s"]["p90"],
                     v["ack_to_scene_m"]["median"], v["ack_to_scene_m"]["p90"],
                     v["scene_to_hospital_m"]["median"], v["scene_to_hospital_m"]["p90"],

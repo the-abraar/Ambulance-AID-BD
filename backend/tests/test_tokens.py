@@ -272,3 +272,29 @@ def test_auth_audit_view_is_admin_only_and_read_only(env):
     assert len(c.get("/auth-audit?limit=1&offset=1", headers=D).json()) == 1
     assert c.get("/auth-audit?limit=501", headers=D).status_code == 422
     assert c.post("/auth-audit", headers=D).status_code == 405 and c.delete("/auth-audit", headers=D).status_code == 405
+
+
+def test_vehicle_pairing_and_service_changes_are_audited(env):
+    c, D, P, veh = env["c"], env["D"], env["P"], env["veh"]
+    assert c.put(f"/vehicles/{veh}/driver", json={"driver_id": env["drv"]}, headers=P).status_code == 200
+    assert c.put(f"/vehicles/{veh}/driver", json={"driver_id": None}, headers=P).status_code == 200
+    assert c.patch(f"/vehicles/{veh}", json={"active": False}, headers=P).status_code == 200
+    assert c.patch("/vehicles/nope", json={"active": True}, headers=P).status_code == 404  # no row for a failed change
+    assert c.put("/vehicles/nope/driver", json={"driver_id": None}, headers=P).status_code == 404
+    rows = c.get("/auth-audit", headers=D).json()[:3]
+    assert [r["action"] for r in rows] == ["vehicle_active:false", f"pair_vehicle:{veh}:none", f"pair_vehicle:{veh}"]
+    assert all(r["actor_name"] == "plain" for r in rows)
+    assert rows[2]["target_name"] == "drv1" and rows[0]["target_user_id"] == veh
+
+
+def test_user_creation_has_a_daily_cap(env):
+    from app.main import USER_CREATES_PER_DAY
+    c, D = env["c"], env["D"]
+    toks = []
+    for i in range(USER_CREATES_PER_DAY):
+        r = c.post("/users", json={"name": f"u{i}", "admin": i == 0}, headers=D)
+        assert r.status_code == 201
+        toks.append(r.json()["token"])
+    assert c.post("/users", json={"name": "x"}, headers=D).status_code == 429
+    new_admin = {"Authorization": f"Bearer {toks[0]}"}  # a freshly minted admin shares the same cap
+    assert c.post("/users", json={"name": "x"}, headers=new_admin).status_code == 429

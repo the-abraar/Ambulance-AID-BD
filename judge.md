@@ -419,3 +419,14 @@ Agent-made, merged through GitHub PRs (not human-reviewed). Score unchanged: not
 - `backup` and `offsite` get health checks that go `unhealthy` when the last good run is over 26 hours old. `docs/deploy.md` adds a host cron dead-man alert.
 - Every service: `no-new-privileges` and Docker log rotation (5 x 10 MB). `app`, `migrate`, `offsite` and `caddy` drop all capabilities (`caddy` keeps `NET_BIND_SERVICE`); `app` and `caddy` run read-only with memory and process limits.
 - `docs/deploy.md`: Host section (UFW, SSH keys only), Logs section, offsite setup moved to a first-deploy step. Checked in a throwaway compose project (`docs/deploy.md`, sixth run); `backend/tests/test_ops_backup.py` covers the retention.
+
+## Update 10 (2026-11-08, agent round)
+
+Agent-made on branch `agent/sec-ambulance-4`, local commit only (not pushed, not human-reviewed). Score unchanged.
+- **SMS daily ceiling:** at most 50 texts per phone number and 500 in total in any 24 h; past that the text is skipped, logged and recorded in `sms_audit` as `skipped: ...`. `POST /users` is also capped at 20 a day across all admins.
+- **Vehicle changes audited:** `PATCH /vehicles/{id}` and `PUT /vehicles/{id}/driver` now write `auth_audit` rows (`vehicle_active:*`, `pair_vehicle:*`).
+- **Narrower `ambulance_app` grants:** `ops/migrate.py` rebuilds the grants each run: SELECT and INSERT everywhere, UPDATE and DELETE only on the tables the code changes, and UPDATE on `users` only for the token columns. It asserts the role cannot change `users.admin` or `users.role`. Tests that age pings use an owner connection, since the app never does that.
+- **CSV export:** registration and operator cells starting with `= + - @`, tab or CR get a leading `'`.
+- **Spec and code agree:** `PATCH /vehicles/{id}` refuses unknown fields and `format` accepts only `json` or `csv` (422 otherwise, uppercase included).
+- **Checks:** `scripts/check.sh` exit 0 (190 passed, 12 skipped, both orders, SQLite); Postgres 16 as owner 191 passed, 11 skipped; as `ambulance_app` 202 passed, forward and reverse.
+- **Owner, before SMS is turned on:** set a spending limit on the BulkSMSBD account.

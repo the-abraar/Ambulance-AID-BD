@@ -371,7 +371,7 @@ paths:
   /auth-audit:
     get:
       summary: Who created, rotated, revoked or paired which credential, newest first (admin only, read-only)
-      description: Rows never hold tokens, pairing codes or full phone numbers (a phone change shows operator prefix and last 3 digits).
+      description: Rows never hold tokens, pairing codes or full phone numbers (a phone change shows operator prefix and last 3 digits). Vehicle changes are logged too (create_vehicle, vehicle_active:true|false, pair_vehicle:<vehicle id>, pair_vehicle:<vehicle id>:none).
       operationId: listAuthAudit
       security: [{BearerAuth: []}]
       parameters:
@@ -409,7 +409,7 @@ paths:
       responses:
         '201': {description: Created., content: {application/json: {schema: {$ref: '#/components/schemas/UserCreated'}}}}
         '403': {description: Not an admin.}
-        '429': {description: Create rate limit.}
+        '429': {description: "Create rate limit (30 a minute per token), or 20 new users a day across all admins."}
 
   /users/{userId}/token/revoke:
     post:
