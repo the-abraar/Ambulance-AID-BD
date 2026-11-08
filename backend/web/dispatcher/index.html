@@ -11,10 +11,11 @@
 <header>
   <h1>Dispatcher Console</h1>
   <form id="login">
-    <input id="token" type="password" placeholder="Dispatcher token" autocomplete="off" aria-label="Dispatcher token">
+    <input id="token" type="text" placeholder="Dispatcher token" autocomplete="off" spellcheck="false" aria-label="Dispatcher token">
     <button>Connect</button>
     <span id="who"></span>
   </form>
+  <button id="signout" type="button" hidden>Sign out</button>
   <button id="btn-reports" type="button">Response Times Report</button>
   <button id="btn-authlog" type="button" class="admin-only" hidden>Auth log</button>
   <button id="sound" type="button" aria-pressed="false">Turn on alarm sound</button>
@@ -163,8 +164,8 @@
   <h2 id="pair-h">Pair <span id="pair-name"></span>'s phone</h2>
   <p>On a phone with the Ambulance Driver app: open the app and type the code. Scanning the QR code opens the app only
     once the server has the app's key (<code>AMBULANCE_ANDROID_CERT_SHA256</code>); otherwise it opens the browser
-    version, which signs the app out. Other phones: scan the QR code, or open <code id="pair-url"></code> and type the
-    code. One use, valid until <span id="pair-exp"></span> (Dhaka time).</p>
+    version, which signs the app out. Other phones: scan the QR code, or open <code id="pair-url"></code>. A phone
+    that is signed in must sign out first. One use, valid until <span id="pair-exp"></span> (Dhaka time).</p>
   <p id="pair-code" class="code"></p>
   <canvas id="pair-qr" width="0" height="0" role="img"></canvas>
   <form method="dialog"><button>Done</button></form>

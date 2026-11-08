@@ -41,10 +41,11 @@ RECENT_TERMINAL_S = 600  # /missions/current keeps showing a just-ended mission 
 BACKFILL_WINDOW = timedelta(days=7)  # how far back a paper-log back-fill or an on-behalf event_time may go
 PAIR_CODE_TTL = timedelta(minutes=10)
 # Wrong /pair codes. Per client in a sliding 10-minute window, so one room's typos never block another (a success
-# clears that client's count). Per code: every wrong guess counts against each live code, and a code that has taken
-# PAIR_CODE_FAILS wrong guesses is deleted (an admin issues a new one), so a guesser has at most 50 tries at a code:
-# 1 in 20,000 for a 6-digit code. Pairing as a whole is never paused; the price is that a guesser can burn live codes.
-PAIR_WINDOW_S, PAIR_CLIENT_FAILS, PAIR_CODE_FAILS = 600, 20, 50
+# clears that client's count). The console's QR link names the driver, so a wrong guess there counts only against that
+# driver's code, which is deleted after PAIR_CODE_FAILS (an admin issues a new one). A typed code names no driver:
+# all typed wrong guesses share PAIR_TYPED_FAILS per window, past which typing answers 429 (QR links still pair) and
+# no code is touched. Either way at most 50 guesses fall on a code by each route: 1 in 20,000 for a 6-digit code.
+PAIR_WINDOW_S, PAIR_CLIENT_FAILS, PAIR_CODE_FAILS, PAIR_TYPED_FAILS = 600, 20, 50, 50
 MAX_SPEED_MPS = 70  # 250 km/h: faster than any ambulance on Bangladesh roads
 JUMP_SLACK_M = 1000  # GPS and cell-fix noise on top of the reported accuracies
 JUMP_WINDOW_S = 600  # only compare with a recent fix, so one bad accepted fix cannot block real ones for long
@@ -464,6 +465,7 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     class PairIn(BaseModel):
         code: Annotated[str, StringConstraints(max_length=20), AfterValidator(pair_code)]
+        driver_id: Annotated[str, StringConstraints(max_length=64)] | None = None  # from the QR link; typed codes have none
 
     def vehicles(db: Conn, vid: str | None = None) -> list[dict]:
         rows = db.execute(
@@ -697,6 +699,11 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
     def rotate_own_token(u: dict = Depends(user), db: Conn = Depends(get_db)):
         return new_token(db, u["id"], u["id"], reenable=False)  # old token stops working at once; new one shown once
 
+    @app.post("/me/token/revoke", status_code=204)
+    def revoke_own_token(u: dict = Depends(user), db: Conn = Depends(get_db)):
+        revoke_user(db, u["id"], u["id"], "signout")  # sign-out ends the token here, not only on the device
+        db.commit()
+
     @app.post("/drivers/{did}/token/rotate")
     def rotate_driver_token(did: str, u: dict = Depends(admin_only), db: Conn = Depends(get_db)):
         return {"driver_id": did, **new_token(db, u["id"], driver_user(db, did), reenable=True)}  # also re-enables a revoked driver
@@ -756,19 +763,34 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
 
     @app.post("/pair")
     def pair(body: PairIn, request: Request, db: Conn = Depends(get_db)):
-        # No auth on purpose: the one-time code is the credential. Guessing is capped per client and per code (above).
+        # No auth on purpose: the one-time code is the credential. Guessing is capped per client, per code and for typed
+        # codes as a whole (above).
         client = f"pair:{request.client.host if request.client else '-'}"
         if rate_over(db, client, PAIR_CLIENT_FAILS, PAIR_WINDOW_S):
             raise HTTPException(429, "too many wrong codes from here, wait 10 minutes")
+        typed = body.driver_id is None
+        if typed and rate_over(db, "pair:typed", PAIR_TYPED_FAILS, PAIR_WINDOW_S):
+            raise HTTPException(429, "too many wrong codes, scan the QR code or wait 10 minutes")
         t, h = now(), hash_token(body.code)
-        row = db.execute("SELECT user_id FROM pairing_codes WHERE code_hash=? AND expires_at>?", (h, t)).fetchone()
+        if typed:
+            row = db.execute("SELECT user_id, code_hash FROM pairing_codes WHERE code_hash=? AND expires_at>?",
+                             (h, t)).fetchone()
+        else:
+            row = db.execute("SELECT p.user_id, p.code_hash FROM pairing_codes p JOIN drivers d ON d.user_id=p.user_id "
+                             "WHERE d.id=? AND p.expires_at>?", (body.driver_id, t)).fetchone()
         # shortcut: unsalted sha256 of a 6-digit code is reversible from a DB dump; fine while codes live 10 minutes.
-        if not row or db.execute("DELETE FROM pairing_codes WHERE code_hash=?", (h,)).rowcount != 1:
+        hit = row and secrets.compare_digest(row["code_hash"], h)
+        if not hit or db.execute("DELETE FROM pairing_codes WHERE user_id=? AND code_hash=?",
+                                 (row["user_id"], h)).rowcount != 1:
             db.rollback()
             rate_hit(db, client)
-            db.execute("UPDATE pairing_codes SET failures=failures+1 WHERE expires_at>?", (t,))
-            if db.execute("DELETE FROM pairing_codes WHERE failures>=?", (PAIR_CODE_FAILS,)).rowcount:
-                logging.warning("pairing code(s) deleted after %d wrong guesses", PAIR_CODE_FAILS)
+            if typed:
+                rate_hit(db, "pair:typed")
+            elif row:  # only the named driver's code pays for a wrong guess at it
+                db.execute("UPDATE pairing_codes SET failures=failures+1 WHERE user_id=?", (row["user_id"],))
+                if db.execute("DELETE FROM pairing_codes WHERE user_id=? AND failures>=?",
+                              (row["user_id"], PAIR_CODE_FAILS)).rowcount:
+                    logging.warning("a pairing code was deleted after %d wrong guesses", PAIR_CODE_FAILS)
             db.commit()
             raise HTTPException(401, "invalid or expired code")
         db.execute("DELETE FROM rate_events WHERE bucket=?", (client,))  # committed with the token below

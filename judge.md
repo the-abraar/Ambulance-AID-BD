@@ -430,3 +430,11 @@ Agent-made on branch `agent/sec-ambulance-4`, local commit only (not pushed, not
 - **Spec and code agree:** `PATCH /vehicles/{id}` refuses unknown fields and `format` accepts only `json` or `csv` (422 otherwise, uppercase included).
 - **Checks:** `scripts/check.sh` exit 0 (190 passed, 12 skipped, both orders, SQLite); Postgres 16 as owner 191 passed, 11 skipped; as `ambulance_app` 202 passed, forward and reverse.
 - **Owner, before SMS is turned on:** set a spending limit on the BulkSMSBD account.
+
+## Update 11 (2026-11-08, agent round)
+
+Agent-made on branch `agent/sec-ambulance-3` (not merged, not human-reviewed). Score unchanged: nothing here moves the cap.
+- **Server-side sign-out:** `POST /me/token/revoke` ends the caller's token (auth log `signout`). The driver app calls it on sign-out (best effort offline); the console has a "Sign out" button that asks first, ends the token, clears `sessionStorage` and reloads.
+- **Console idle:** after 30 minutes without input and with no active mission, the console forgets the token (it stays valid). The token field is masked text, not a password field.
+- **Pairing links:** the console's QR link is `/driver/#pair=DRIVER_ID.CODE`; a wrong guess with a driver id counts only against that driver's code. Typed codes share 50 wrong guesses per 10 minutes and never delete a code. A pairing link opened on a signed-in phone is refused ("Sign out first") unless the stored token turns out to be dead.
+- **Checks:** `scripts/check.sh` exit 0 (186 passed, 3 skipped, both orders, SQLite). Browser e2e 140/140.

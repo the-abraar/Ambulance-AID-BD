@@ -20,7 +20,7 @@ also runs between missions: it reports the free vehicle once a minute and rings 
 - `PingQueue` (plain Kotlin, unit-tested): the sampling and drop rules below.
 - `ShiftWatch` (plain Kotlin, unit-tested): what the shift poll's answer means (alert, clear, stop, mission or not).
 - App Link: `BASE_URL`'s scheme, host and path (`/driver/`) open in the app, so scanning the console's pairing QR
-  (`/driver/#pair=CODE`) pairs the app, not the browser. Android verifies it against the server's
+  (`/driver/#pair=DRIVER_ID.CODE`) pairs the app, not the browser. Android verifies it against the server's
   `/.well-known/assetlinks.json`, which lists `AMBULANCE_ANDROID_CERT_SHA256` (the signing key's fingerprint:
   `keytool -list -v -keystore <release keystore>`). Until that is set, the link opens the browser, and the console tells
   drivers with the app to type the code instead.

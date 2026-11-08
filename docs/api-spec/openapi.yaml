@@ -39,9 +39,11 @@ paths:
       summary: Exchange a 6-digit pairing code for a driver token (no auth; the one-time code is the credential)
       description: >
         Rotates the driver's token (the old one stops working) and re-enables a revoked driver. Bangla digits are
-        accepted. One client (IP address) gets 20 wrong codes per 10 minutes, and a success clears its count. Every wrong
-        guess also counts against each live code, which is deleted after 50, so at most 50 guesses fall on a code.
-        Pairing is never paused for everyone; a guesser can only burn live codes, and an admin issues a new one.
+        accepted. The console's QR link (/driver/#pair=DRIVER_ID.CODE) sends driver_id; a typed code does not. One
+        client (IP address) gets 20 wrong codes per 10 minutes, and a success clears its count. With driver_id, a wrong
+        guess counts only against that driver's code, which is deleted after 50. Without it, all clients' wrong typed
+        codes together get 50 per 10 minutes; past that, typed codes get 429 until the window passes, while QR links
+        still pair, and no code is deleted. So at most 50 guesses fall on a code by each route.
       operationId: pair
       requestBody:
         required: true
@@ -50,7 +52,7 @@ paths:
         '200': {description: Paired; token shown once., content: {application/json: {schema: {$ref: '#/components/schemas/PairResult'}}}}
         '401': {description: "Wrong, used or expired code."}
         '422': {description: Not 6 digits.}
-        '429': {description: "Too many wrong codes from this client (wait up to 10 minutes). A code that takes 50 wrong guesses is deleted; the next attempt with it gets 401 and an admin issues a new one."}
+        '429': {description: "Too many wrong codes from this client, or (typed codes only) from all clients together; wait up to 10 minutes or use the QR link. A code that takes 50 wrong guesses with its driver_id is deleted; the next attempt with it gets 401 and an admin issues a new one."}
 
   /missions:
     get:
@@ -177,6 +179,19 @@ paths:
       security: [{BearerAuth: []}]
       responses:
         '200': {description: "New token, shown once.", content: {application/json: {schema: {$ref: '#/components/schemas/TokenRotated'}}}}
+
+  /me/token/revoke:
+    post:
+      summary: Sign out on the server; the caller's token stops working at once
+      description: >
+        Sets revoked_at for the caller (driver, dispatcher or admin), deletes a driver's live pairing code and writes a
+        'signout' auth_audit row. A driver signs in again with a new pairing code; a dispatcher or admin needs an admin
+        to rotate their token (or `python -m app.bootstrap` on the server for the last admin).
+      operationId: revokeOwnToken
+      security: [{BearerAuth: []}]
+      responses:
+        '204': {description: Signed out.}
+        '401': {description: "Missing, expired or already ended token."}
 
   /meta/transitions:
     get:
@@ -644,7 +659,9 @@ components:
     PairRequest:
       type: object
       required: [code]
-      properties: {code: {type: string, description: '6 digits; Bangla digits accepted.', example: "042917"}}
+      properties:
+        code: {type: string, description: '6 digits; Bangla digits accepted.', example: "042917"}
+        driver_id: {type: string, maxLength: 64, description: "The driver the code was issued for, from the console's QR link. Omit for a typed code."}
 
     PairResult:
       type: object
@@ -670,7 +687,7 @@ components:
       properties:
         id: {type: integer}
         ts: {type: string, format: date-time}
-        action: {type: string, description: "create_driver, create_user, create_vehicle, pairing_code, pair, rotate, revoke, update_phone:018****567->019****567, ..."}
+        action: {type: string, description: "create_driver, create_user, create_vehicle, pairing_code, pair, rotate, revoke, signout, update_phone:018****567->019****567, ..."}
         actor_id: {type: string}
         actor_name: {type: [string, "null"]}
         target_user_id: {type: string}

@@ -10,7 +10,7 @@ const T = {
     cancelled: 'ডিসপ্যাচার মিশনটি বাতিল করেছেন', completed: 'মিশন সম্পন্ন',
     e401: 'প্রবেশ বাতিল বা মেয়াদ শেষ। ডিসপ্যাচারের কাছ থেকে নতুন ৬ সংখ্যার কোড নিয়ে আবার প্রবেশ করুন।', e409: 'মিশন বদলে গেছে। রিফ্রেশ করুন।',
     e429: 'অনুরোধ খুব দ্রুত। একটু পরে চেষ্টা করুন।', eCode: 'কোডটি ভুল বা মেয়াদোত্তীর্ণ। ডিসপ্যাচারের কাছ থেকে নতুন কোড নিন।', eCode6: '৬ সংখ্যার কোড দিন।',
-    eCode429: 'অনেকবার ভুল কোড। ১০ মিনিট পরে আবার চেষ্টা করুন।',
+    eCode429: 'অনেকবার ভুল কোড। QR কোড স্ক্যান করুন বা ১০ মিনিট পরে আবার চেষ্টা করুন।', pairBusy: 'অন্য অ্যাকাউন্টে প্রবেশ করতে আগে বের হন।',
     offline: 'অফলাইন। অবস্থা পরিবর্তন করা যাবে না। লোকেশন সর্বোচ্চ ৫ মিনিট রাখা হয় এবং অনলাইন হলে পাঠানো হবে।', eStatus: 'অবস্থা পরিবর্তন ব্যর্থ। আবার চেষ্টা করুন।',
     eNet: 'সার্ভারে পৌঁছানো যায়নি।', slow: 'নেটওয়ার্ক ধীর। আবার চেষ্টা করা হচ্ছে…',
     skew: 'ফোনের ঘড়ি ১ মিনিটের বেশি ভুল। সেটিংসে স্বয়ংক্রিয় তারিখ ও সময় চালু করুন। ট্র্যাকিং চলছে।',
@@ -28,7 +28,7 @@ const T = {
     cancelled: 'Cancelled by dispatcher', completed: 'Mission completed',
     e401: 'Signed out: sign-in expired or revoked. Get a new 6-digit code from the dispatcher and sign in again.', e409: 'Mission changed. Refresh.',
     e429: 'Too many requests. Try again shortly.', eCode: 'Wrong or expired code. Ask the dispatcher for a new one.', eCode6: 'Enter the 6-digit code.',
-    eCode429: 'Too many wrong codes. Try again in 10 minutes.',
+    eCode429: 'Too many wrong codes. Scan the QR code, or try again in 10 minutes.', pairBusy: 'Sign out first to pair another account.',
     offline: 'Offline. Status changes unavailable. Locations are kept for up to 5 minutes and sent when back online.', eStatus: 'Status change failed. Try again.',
     eNet: 'Cannot reach server.', slow: 'Network slow, retrying…',
     skew: 'Phone clock is off by more than 1 minute. Turn on automatic date and time in Settings. Tracking still works.',
@@ -74,22 +74,30 @@ async function api(method, path, body) {
   return r;
 }
 function signOut(expired) { // expired (401): keep the queue, its entries carry their own mission and vehicle
-  if (!expired) { shift = false; try { localStorage.removeItem(QK); localStorage.removeItem('shift'); } catch (e) {} } // a new sign-in starts off shift
+  if (!expired) {
+    if (token) fetchT('/me/token/revoke', req('POST', null, {Authorization: 'Bearer ' + token})).catch(() => {}); // ends the token on the server too; best effort offline
+    shift = false; try { localStorage.removeItem(QK); localStorage.removeItem('shift'); } catch (e) {} // a new sign-in starts off shift
+  }
   setToken(''); me = null; mission = null; msgs = {}; msgKeys = {};
   track(); render(); if (expired) sayT('auth', 'e401', true);
 }
-async function pair(code) {
+async function pair(code, driverId) { // driverId comes only from the console's QR link
   sayT('auth', 'pairing');
   try {
-    const r = await fetchT('/pair', req('POST', {code}));
+    const r = await fetchT('/pair', req('POST', driverId ? {code, driver_id: driverId} : {code}));
     if (r.ok) { setToken((await r.json()).token); sayT('auth', ''); return load(); }
     sayT('auth', {401: 'eCode', 422: 'eCode6', 429: 'eCode429'}[r.status] || 'eNet', true);
   } catch (e) { sayT('auth', navigator.onLine ? 'eNet' : 'offline', true); }
 }
-function fromHash() { // the console's QR opens /driver/#pair=CODE; the code leaves the address bar and history at once
-  const m = /^#pair=(.+)$/.exec(location.hash);
+function fromHash() { // the console's QR opens /driver/#pair=DRIVER_ID.CODE; it leaves the address bar and history at once
+  const m = /^#pair=(?:([\w-]+)\.)?(.+)$/.exec(location.hash);
   if (!m) return false;
-  history.replaceState(null, '', location.pathname + location.search); pair(m[1]); return true;
+  history.replaceState(null, '', location.pathname + location.search); pairLink(m[2], m[1]); return true;
+}
+async function pairLink(code, driverId) { // a link never switches a signed-in phone to another account silently
+  if (token) { try { await api('GET', '/me'); } catch (e) {} } // a dead token answers 401 and is signed out first
+  if (token) { sayT('auth', 'pairBusy', true); return load(); }
+  pair(code, driverId);
 }
 
 // ---- offline queue (pings only; status changes are never queued). Each entry keeps its vehicle and mission (B9).
