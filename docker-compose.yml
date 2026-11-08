@@ -1,8 +1,13 @@
 # Run end to end on a laptop on 2026-10-14 (see docs/deploy.md); not yet run on a real host.
 # Needs a .env next to this file; see .env.example. Caddy gets a TLS certificate for $DOMAIN automatically,
 # so DNS for $DOMAIN must point at this host and ports 80/443 must be open (HTTPS is required for phone GPS).
+# Every service: Docker logs rotated at 5 x 10 MB, and no privilege gain through setuid binaries (docs/deploy.md).
+x-defaults: &defaults
+  logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+  security_opt: [no-new-privileges:true]
 services:
-  db:
+  db:  # keeps its default capabilities: the postgres entrypoint needs them to chown its data and drop to `postgres`
+    <<: *defaults
     image: postgres:16
     restart: unless-stopped
     # Refuse the .env.example placeholders, short passwords, and characters that would break the postgresql:// URLs.
@@ -25,6 +30,8 @@ services:
       interval: 5s
       retries: 10
   migrate:  # one-shot, as the owner: migrations, then least-privilege grants for the app role (ops/migrate.py)
+    <<: *defaults
+    cap_drop: [ALL]
     build: ./backend
     image: ambulance-aid-bd
     restart: "no"
@@ -37,6 +44,12 @@ services:
     depends_on:
       db: {condition: service_healthy}
   app:
+    <<: *defaults
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    pids_limit: 200
     build: ./backend
     image: ambulance-aid-bd
     restart: unless-stopped
@@ -57,7 +70,8 @@ services:
       start_period: 20s
     depends_on:
       migrate: {condition: service_completed_successfully}
-  backup:  # nightly encrypted pg_dump into ./backups, newest 14 kept (ops/backup.sh); restore with ops/restore.sh
+  backup:  # nightly encrypted pg_dump into ./backups, deleted after 14 days (ops/backup.sh); restore with ops/restore.sh
+    <<: *defaults  # runs as root (its entrypoint skips the image's drop to `postgres`), so default capabilities stay
     image: postgres:16
     restart: unless-stopped
     entrypoint: [bash, /ops/backup.sh]
@@ -68,9 +82,16 @@ services:
       PGDATABASE: ambulance
       BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE in .env}
     volumes: [./ops:/ops:ro, ./backups:/backups]
+    healthcheck:  # unhealthy when the newest dump is over 26 hours old: one missed night shows in `docker compose ps`
+      test: [CMD-SHELL, "find /backups -maxdepth 1 -name 'ambulance-*.dump.gpg' -mmin -1560 | grep -q ."]
+      interval: 10m
+      start_period: 10m
+      start_interval: 10s
     depends_on:
       migrate: {condition: service_completed_successfully}  # so the first dump already has the schema
   offsite:  # only with COMPOSE_PROFILES=offsite: nightly copy of the encrypted dumps to BACKUP_OFFSITE (ops/offsite.sh)
+    <<: *defaults
+    cap_drop: [ALL]
     image: rclone/rclone:1.68
     profiles: [offsite]
     restart: unless-stopped
@@ -78,7 +99,19 @@ services:
     environment:
       BACKUP_OFFSITE: ${BACKUP_OFFSITE:-}
     volumes: [./ops:/ops:ro, ./backups:/backups:ro, ./rclone.conf:/config/rclone/rclone.conf:ro]
+    healthcheck:  # unhealthy when the last good copy (ops/offsite.sh touches the file) is over 26 hours old
+      test: [CMD-SHELL, "find /tmp/offsite-ok -mmin -1560 | grep -q ."]
+      interval: 10m
+      start_period: 10m
+      start_interval: 10s
   caddy:
+    <<: *defaults
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]  # ports 80 and 443
+    read_only: true
+    tmpfs: [/tmp, /config]  # /config holds only Caddy's autosaved copy of the Caddyfile; certificates live in /data
+    mem_limit: 256m
+    pids_limit: 200
     image: caddy:2
     restart: unless-stopped
     ports: ["80:80", "443:443"]

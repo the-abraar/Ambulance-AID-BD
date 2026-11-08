@@ -1,13 +1,15 @@
 #!/bin/sh
 # Compose `offsite` sidecar (profile `offsite`, off by default): copies the encrypted dumps in ./backups to
 # $BACKUP_OFFSITE (an rclone remote from ./rclone.conf, e.g. `offsite:bucket/ambulance`) at start, then nightly at
-# 20:30 UTC, after ops/backup.sh. Copies older than 15 days are deleted there, to keep the 14-day retention promise.
+# 20:30 UTC, after ops/backup.sh. Copies older than 14 days are deleted there, the same retention as on the host.
+# Each good run touches /tmp/offsite-ok; the compose health check turns unhealthy when it is over 26 hours old.
 # Only *.dump.gpg leaves the host; the passphrase never does. Setup: docs/deploy.md, "Offsite copy".
 set -u
 : "${BACKUP_OFFSITE:?set BACKUP_OFFSITE in .env, e.g. offsite:bucket/ambulance}"
 while :; do
   if rclone copy /backups "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg' &&
-     rclone delete "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg' --min-age 15d; then
+     rclone delete "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg' --min-age 14d; then
+    touch /tmp/offsite-ok
     echo "offsite ok: $(rclone lsf "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg' | wc -l) dumps at $BACKUP_OFFSITE"
   else
     echo "OFFSITE FAILED at $(date -u +%FT%TZ)" >&2
