@@ -12,6 +12,18 @@ val localProps = Properties().apply {
 val baseUrlProp = (findProperty("ambulance.baseUrl") as String?) ?: localProps.getProperty("ambulance.baseUrl")
 val devUrl = "http://10.0.2.2:8000/driver/" // the host machine as seen from the Android emulator
 
+// Release signing: keystore path and passwords come from Gradle properties (-P..., or ~/.gradle/gradle.properties) or
+// the environment, never from the repo. Debug builds enable WebView debugging, so real phones get only signed releases.
+fun signingValue(prop: String, env: String): String? = (findProperty(prop) as String?) ?: System.getenv(env)
+val releaseSigning = mapOf(
+    "storeFile" to signingValue("ambulance.keystore", "AMBULANCE_KEYSTORE"),
+    "storePassword" to signingValue("ambulance.keystorePassword", "AMBULANCE_KEYSTORE_PASSWORD"),
+    "keyAlias" to signingValue("ambulance.keyAlias", "AMBULANCE_KEY_ALIAS"),
+    "keyPassword" to signingValue("ambulance.keyPassword", "AMBULANCE_KEY_PASSWORD"),
+)
+val releaseSigningMissing = releaseSigning.filterValues { it.isNullOrEmpty() }.keys
+val releaseStoreFile = releaseSigning["storeFile"]?.let { rootProject.file(it) } // relative = from android/
+
 // The App Link for the console's pairing QR (<BASE_URL>#pair=CODE). An unset release URL fails in preReleaseBuild below;
 // the placeholder host only lets Gradle configure.
 fun appLink(url: String): Map<String, String> = URI(url.ifEmpty { "https://unset.invalid/driver/" }).let {
@@ -32,13 +44,25 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    signingConfigs {
+        create("release") {
+            if (releaseSigningMissing.isEmpty()) {
+                storeFile = releaseStoreFile
+                storePassword = releaseSigning["storePassword"]
+                keyAlias = releaseSigning["keyAlias"]
+                keyPassword = releaseSigning["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         debug {
             buildConfigField("String", "BASE_URL", "\"${baseUrlProp ?: devUrl}\"")
             manifestPlaceholders += appLink(baseUrlProp ?: devUrl)
         }
         release {
-            // Release must be HTTPS and must name its host; there is no default. Signing is the owner's (see docs/android-wrapper.md).
+            // Release must be HTTPS, must name its host (there is no default) and must be signed (checked in preReleaseBuild).
+            if (releaseSigningMissing.isEmpty()) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "BASE_URL", "\"${baseUrlProp.orEmpty()}\"")
             manifestPlaceholders += appLink(baseUrlProp.orEmpty())
         }
@@ -53,5 +77,11 @@ val releaseUrl = baseUrlProp.orEmpty()
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     doFirst {
         require(releaseUrl.startsWith("https://")) { "Set ambulance.baseUrl to the HTTPS driver app URL for a release build (got '$releaseUrl')" }
+        require(releaseSigningMissing.isEmpty()) {
+            "A release build must be signed: set ambulance.keystore, ambulance.keystorePassword, ambulance.keyAlias and " +
+                "ambulance.keyPassword (Gradle properties) or AMBULANCE_KEYSTORE, AMBULANCE_KEYSTORE_PASSWORD, " +
+                "AMBULANCE_KEY_ALIAS and AMBULANCE_KEY_PASSWORD (missing: ${releaseSigningMissing.joinToString()})"
+        }
+        require(releaseStoreFile!!.isFile) { "Release keystore not found: $releaseStoreFile" }
     }
 }

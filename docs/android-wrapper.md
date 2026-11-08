@@ -113,12 +113,47 @@ gitignored).
 ```sh
 cd android
 ./gradlew testDebugUnitTest          # JVM tests for the ping queue and request JSON
-./gradlew assembleDebug              # app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleDebug              # app/build/outputs/apk/debug/app-debug.apk (emulator only)
 ```
 
 `BASE_URL` comes from the Gradle property `ambulance.baseUrl` (`-Pambulance.baseUrl=...` or a line in
 `android/local.properties`). Debug defaults to `http://10.0.2.2:8000/driver/` (the host machine from the emulator); plain
-HTTP is allowed only to `10.0.2.2`, and only in debug. A release build fails unless `ambulance.baseUrl` is `https://`.
+HTTP is allowed only to `10.0.2.2`, and only in debug. A release build fails unless `ambulance.baseUrl` is `https://`
+and the release signing key below is set.
+
+### Release build (every real phone)
+
+Debug builds turn on WebView debugging (`chrome://inspect`), which lets anyone with the phone and a USB cable read the
+driver's sign-in from the page's storage. Real phones get only a signed release build.
+
+The owner creates the release keystore once and keeps it, and both passwords, in a password manager, outside the repo
+(losing it means drivers must uninstall before they can take an update signed with a new key):
+
+```sh
+keytool -genkeypair -keystore ~/keys/ambulance-release.jks -storetype PKCS12 -alias ambulance \
+  -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Ambulance AID BD"
+```
+
+The build reads the keystore from Gradle properties (`-P...` or `~/.gradle/gradle.properties`, not the repo's
+`gradle.properties`) or from the environment. A relative keystore path counts from `android/`; use an absolute one.
+
+| Gradle property | Environment variable |
+|---|---|
+| `ambulance.keystore` | `AMBULANCE_KEYSTORE` |
+| `ambulance.keystorePassword` | `AMBULANCE_KEYSTORE_PASSWORD` |
+| `ambulance.keyAlias` | `AMBULANCE_KEY_ALIAS` |
+| `ambulance.keyPassword` | `AMBULANCE_KEY_PASSWORD` |
+
+```sh
+cd android
+./gradlew assembleRelease -Pambulance.baseUrl=https://<host>/driver/   # app/build/outputs/apk/release/app-release.apk
+$ANDROID_HOME/build-tools/<version>/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+keytool -list -v -keystore ~/keys/ambulance-release.jks              # SHA256: line for AMBULANCE_ANDROID_CERT_SHA256
+```
+
+A release build with any of the four unset, or a keystore path that does not exist, stops before compiling. Put the
+key's SHA-256 (`AB:CD:...`) in the server's `AMBULANCE_ANDROID_CERT_SHA256`, so `/.well-known/assetlinks.json` lists
+it and the pairing QR opens the app.
 
 ## Try it on the emulator
 
@@ -132,7 +167,11 @@ adb emu geo fix 90.4125 23.8103                   # move with more geo fix calls
 The web app's own geolocation fallback needs HTTPS (browsers refuse geolocation on plain HTTP), so on the emulator only
 the native path reports positions. Debug builds allow `chrome://inspect` on the WebView.
 
-On a real phone, point a debug build at an HTTPS host: `./gradlew assembleDebug -Pambulance.baseUrl=https://<host>/driver/`.
+Do not install a debug build on a real phone; use the release build above.
+
+Release signing checked 2026-11-08 with a throwaway test key (not the real one): `assembleRelease` makes a signed
+`app-release.apk`, `apksigner verify --print-certs` shows that key, the APK is not debuggable, and a release build
+without the key fails.
 
 Emulator smoke test, 2026-10-14 (Android 17 image, API 37.1; not a real phone):
 - Pings every 5 s while moving and every 10 s while still: in the foreground, on the home screen with the screen off,
@@ -145,10 +184,9 @@ Emulator smoke test, 2026-10-14 (Android 17 image, API 37.1; not a real phone):
 
 ## Not done (owner)
 
-- Release signing: create a keystore, add a `signingConfigs` block reading it from outside the repo, then
-  `./gradlew assembleRelease -Pambulance.baseUrl=https://<real host>/driver/`. Put the key's SHA-256 in the server's
-  `AMBULANCE_ANDROID_CERT_SHA256`, and check on a phone that scanning the pairing QR opens the app (UNVERIFIED: not
-  run, it needs the real host).
+- The release keystore (see "Release build"), the server's `AMBULANCE_ANDROID_CERT_SHA256`, and a check on a phone
+  that scanning the pairing QR opens the app and that `chrome://inspect` does not list its WebView (UNVERIFIED: not
+  run, it needs the real key and host).
 - The real host URL.
 - A device test on two or three cheap Androids (Xiaomi/Redmi, Realme, Vivo or Oppo): screen off, Navigate to Maps,
   2G, 30+ minutes. The emulator does not reproduce OEM background killers. Add for shift mode (not yet run, even on the
