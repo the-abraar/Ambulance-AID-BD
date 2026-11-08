@@ -8,8 +8,10 @@ Status: run end to end on a laptop on 2026-10-14 (results below). Never run on a
 | `migrate` | app image, one-shot | As the owner (`postgres`): runs migrations, then (re)creates the app's role `ambulance_app` with least privilege (`ops/migrate.py`). |
 | `app` | app image (`backend/Dockerfile`, hashed deps from `backend/requirements.lock`) | Connects as `ambulance_app`, not a superuser. Starts only after `migrate` succeeds. Health check: `GET /healthz`. Trusts Caddy's `X-Forwarded-For` (`FORWARDED_ALLOW_IPS`), so per-client limits see the phone's IP. |
 | `backup` | postgres:16 | `pg_dump` at start and nightly at 20:00 UTC (02:00 Dhaka), encrypted with `BACKUP_PASSPHRASE`, into `./backups/`, deleted after 14 days (`ops/backup.sh`). Health check: unhealthy when the newest dump is over 26 hours old. |
-| `offsite` | rclone/rclone:1.68 | Off unless `COMPOSE_PROFILES=offsite`. Copies the encrypted dumps to `BACKUP_OFFSITE` at start and nightly at 20:30 UTC, deletes copies there after 14 days (`ops/offsite.sh`). Health check: unhealthy when the last good copy is over 26 hours old. |
+| `offsite` | rclone/rclone:1.75.2 | Off unless `COMPOSE_PROFILES=offsite`. Copies the encrypted dumps to `BACKUP_OFFSITE` at start and nightly at 20:30 UTC, deletes copies there after 14 days (`ops/offsite.sh`). Health check: unhealthy when the last good copy is over 26 hours old. |
 | `caddy` | caddy:2 | TLS, security headers, gzip/zstd, 64 KB body cap, upstream health check. Starts after `app` is healthy. |
+
+Images are pinned by digest (`tag@sha256:...`) in `docker-compose.yml` and `backend/Dockerfile`, so every host runs the same bytes; Dependabot (`.github/dependabot.yml`) opens a PR when a tag moves. To bump by hand: `docker buildx imagetools inspect IMAGE:TAG` prints the new index digest.
 
 ## First deploy
 
@@ -90,10 +92,10 @@ Do this before step 1 of the first deploy (Ubuntu commands; adapt for other syst
      - Preferred: a bucket with object lock (or versioning) and a 14-day lifecycle rule that deletes old copies, and a key that can write new files but not delete or overwrite them. A stolen host key then cannot wipe or replace the offsite copies. With this setup, the bucket enforces the 14 days, so in `ops/offsite.sh` replace the two lines from `if rclone copy` through `--min-age 14d; then` with this one line (keep the `then` branch below it as is):
        `if rclone copy /backups "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg'; then`
      - Otherwise: give the key write and delete rights on one bucket or folder only. `ops/offsite.sh` then deletes copies older than 14 days.
-  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work. Make it owned by root and readable only by root: `sudo chown root:root rclone.conf && sudo chmod 600 rclone.conf`. `offsite` runs as root with all capabilities dropped, so it cannot read a 0600 file that belongs to another user, and every run fails with `OFFSITE FAILED`.
+  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.75.2 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work. Make it owned by root and readable only by root: `sudo chown root:root rclone.conf && sudo chmod 600 rclone.conf`. `offsite` runs as root with all capabilities dropped, so it cannot read a 0600 file that belongs to another user, and every run fails with `OFFSITE FAILED`.
   3. In `.env`: `BACKUP_OFFSITE=REMOTE:bucket/ambulance` and `COMPOSE_PROFILES=offsite`. Then `docker compose up -d`.
   4. `docker compose logs offsite` shows `offsite ok: N dumps at ...` or `OFFSITE FAILED`, and `docker compose ps offsite` shows `healthy`. Copies older than 14 days are deleted there, the same as on the host. Add `offsite` to the alert's list of services.
-  5. Only `*.dump.gpg` files leave the host. To restore from offsite on a new host: `docker run --rm -v "$PWD:/config/rclone" -v "$PWD/backups:/backups" rclone/rclone:1.68 copy REMOTE:bucket/ambulance /backups`, then the restore below.
+  5. Only `*.dump.gpg` files leave the host. To restore from offsite on a new host: `docker run --rm -v "$PWD:/config/rclone" -v "$PWD/backups:/backups" rclone/rclone:1.75.2 copy REMOTE:bucket/ambulance /backups`, then the restore below.
 
 ## Restore drill (monthly, and after any change to `ops/` or `docker-compose.yml`)
 
