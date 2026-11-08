@@ -9,7 +9,7 @@ PY="${PYTHON:-}"
 [ -n "$PY" ] || { echo "Python 3.11 or 3.12 is required (set \$PYTHON); 3.14 breaks scipy and others." >&2; exit 1; }
 VENV="${CHECK_VENV:-$HOME/.cache/Ambulance-AID-BD-check-venv}"
 if [ ! -x "$VENV/bin/python" ]; then "$PY" -m venv "$VENV"; fi
-"$VENV/bin/pip" install -q -r backend/requirements-dev.txt
+"$VENV/bin/pip" install -q --require-hashes -r backend/requirements-dev.lock
 export PATH="$VENV/bin:$PATH"
 
 names=(); results=()
@@ -29,6 +29,7 @@ step stray-files stray
 if [ "$FAST" = 0 ]; then
   step js-syntax jscheck
   step unsafe-html scripts/lint-innerhtml.sh
+  step html-lint-selftest scripts/test-lint-innerhtml.sh
   step openapi openapi-spec-validator docs/api-spec/openapi.yaml
   step pytest bash -c 'cd backend && pytest'
   step pytest-reverse rev

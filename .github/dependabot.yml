@@ -1,0 +1,18 @@
+# Keeps the SHA-pinned actions, digest-pinned images and hashed locks current. Pins without updates rot.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: gradle
+    directory: /android
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /backend
+    schedule: {interval: weekly}
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: {interval: weekly}
