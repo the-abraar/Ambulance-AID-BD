@@ -27,6 +27,7 @@ jobs:
         run: |
           norm() { awk -F'==' '{n=tolower($1); gsub(/[-_.]+/, "-", n); print n "==" $2}' | sort; }
           want=$(grep -E '^[A-Za-z0-9_.-]+==[^ ;]+ \\$' backend/requirements.lock | cut -d' ' -f1 | norm)
+          [ -n "$want" ] || { echo "no pins parsed from requirements.lock"; exit 1; }
           missing=$(comm -23 <(echo "$want") <(pip freeze | norm))
           [ -z "$missing" ] || { echo "installed versions differ from requirements.lock:"; echo "$missing"; exit 1; }
       - name: pytest on Postgres as the least-privilege ambulance_app role
