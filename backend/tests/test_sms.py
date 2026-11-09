@@ -114,3 +114,37 @@ def test_backfill_never_pages_the_driver_and_on_behalf_steps_keep_order(env, gat
                    headers=D).status_code == 422  # before the previous step
     r = c.patch(p, json={"status": "AT_SCENE", "reason": "phone dead", "event_time": iso(hours=-1)}, headers=D)
     assert r.status_code == 200 and r.json()["created_at"] < r.json()["en_route_pickup_at"] < r.json()["at_scene_at"]
+
+
+def test_daily_sms_cap_per_number_records_skips(env, gateway):
+    """One dispatcher token looping create+cancel cannot text a number more than the daily cap."""
+    from datetime import timedelta
+    from app.db import now
+    from app.main import SMS_PER_NUMBER_DAY
+    got, _ = gateway
+    with_phone(env)
+    c, P = env["c"], env["P"]  # a plain, non-admin dispatcher
+    for _ in range(SMS_PER_NUMBER_DAY):  # sends from yesterday no longer count
+        env["db"].execute("INSERT INTO sms_audit (mission_id,driver_id,event,result,ts) VALUES ('old',?,'create','sent',?)",
+                          (env["drv"], now(timedelta(hours=-25))))
+    env["db"].commit()
+    for _ in range(30):
+        r = c.post("/missions", json={"pickup_address": "x", "assigned_vehicle_id": env["veh"],
+                                      "assigned_driver_id": env["drv"]}, headers=P)
+        assert r.status_code == 201, r.text
+        assert c.patch(f"/missions/{r.json()['mission_id']}/status", json={"status": "CANCELLED"},
+                       headers=P).status_code == 200
+    assert len(got) == SMS_PER_NUMBER_DAY == 50
+    res = [r[3] for r in sms_rows(env) if r[0] != "old"]
+    assert res == ["sent"] * 50 + ["skipped: daily cap for this number"] * 10
+
+
+def test_daily_sms_cap_for_all_numbers(env, gateway, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main, "SMS_TOTAL_DAY", 3)
+    got, _ = gateway
+    with_phone(env)
+    for _ in range(2):
+        m = mk(env)
+        env["c"].patch(f"/missions/{m}/status", json={"status": "CANCELLED"}, headers=env["D"])
+    assert len(got) == 3 and [r[3] for r in sms_rows(env)] == ["sent"] * 3 + ["skipped: daily cap for all numbers"]

@@ -17,7 +17,7 @@ def pings(e, veh="veh"):
 
 def age_pings(e, s):
     t = (datetime.now(timezone.utc) - timedelta(seconds=s)).isoformat(timespec="microseconds")
-    e["db"].execute("UPDATE vehicle_pings SET ts=?", (t,)); e["db"].commit()
+    e["owner"].execute("UPDATE vehicle_pings SET ts=?", (t,)); e["owner"].commit()
 
 
 def test_n2_paired_driver_on_shift_reports_a_free_vehicle(env):

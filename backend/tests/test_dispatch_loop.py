@@ -197,7 +197,7 @@ def test_s8_spoofed_positions(env):
     assert ping(env, lat=DHAKA["lat"] + 0.005).status_code == 201  # 550 m: GPS noise is tolerated
     assert ping(env, lat=DHAKA["lat"] + 0.03).status_code == 422  # 3 km in a second
     assert ping(env, lat=DHAKA["lat"] + 0.03, accuracy=2500).status_code == 201  # unless the fix says it is that rough
-    env["db"].execute("UPDATE vehicle_pings SET ts='2000-01-01T00:00:00+00:00'"); env["db"].commit()
+    env["owner"].execute("UPDATE vehicle_pings SET ts='2000-01-01T00:00:00+00:00'"); env["owner"].commit()
     assert ping(env, lat=22.35, lng=91.78).status_code == 201  # Chittagong after a long gap is fine
 
 
@@ -345,3 +345,15 @@ def test_response_times_report(env):
     csv_res = c.get("/reports/response-times?format=csv", headers=D)
     assert csv_res.status_code == 200 and csv_res.headers["content-type"].startswith("text/csv")
     assert "Registration" in csv_res.text.splitlines()[0]
+
+
+def test_csv_report_neutralises_formula_cells(env):
+    import csv
+    import io
+    from tests.test_oct15 import FULL, backfill
+    c, P = env["c"], env["P"]  # a plain dispatcher may name vehicles
+    v = c.post("/vehicles", json={"operator": "@x", "registration": "=1+1"}, headers=P).json()["vehicle_id"]
+    assert backfill(env, FULL, assigned_vehicle_id=v, assigned_driver_id=None).status_code == 201
+    rows = list(csv.reader(io.StringIO(c.get("/reports/response-times?format=csv", headers=P).text)))
+    row = next(r for r in rows if r[1] == v)
+    assert (row[2], row[3]) == ("'=1+1", "'@x")

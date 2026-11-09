@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -26,8 +27,10 @@ def env(target):
     veh = add_vehicle(db, "Op", "DHK-1")
     veh2 = add_vehicle(db, "Op", "DHK-2")
     db.commit()
+    # Test-only edits the app itself never makes (e.g. ageing pings) need the owner when tests run as ambulance_app.
+    owner = connect(os.environ["TEST_DATABASE_URL"]) if os.environ.get("TEST_DATABASE_APP_ROLE") == "1" else db
     h = lambda t: {"Authorization": f"Bearer {t}"}
-    return dict(c=c, app=app, db=db, D=h(dt), P=h(pt), V=h(vt), V2=h(vt2), drv=drv, drv2=drv2, veh=veh, veh2=veh2,
+    return dict(c=c, app=app, db=db, owner=owner, D=h(dt), P=h(pt), V=h(vt), V2=h(vt2), drv=drv, drv2=drv2, veh=veh, veh2=veh2,
                 did=did, pid=pid, path=target)
 
 

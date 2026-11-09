@@ -39,3 +39,29 @@ def test_app_role_mode_refuses_a_shared_cluster(target):
     finally:
         with psycopg.connect(owner, autocommit=True) as c:
             c.execute("DROP DATABASE app_role_guard_probe")
+
+
+@pytest.mark.parametrize("stmt", ["UPDATE users SET admin=true", "UPDATE users SET role='dispatcher'", "DELETE FROM users",
+                                  "DELETE FROM missions", "DELETE FROM drivers", "DELETE FROM vehicles",
+                                  "UPDATE vehicle_pings SET lat=0", "UPDATE sms_audit SET result='x'"])
+def test_app_role_cannot_escalate_or_delete_core_rows(target, stmt):
+    import os
+    if os.environ.get(APP_ROLE) != "1":
+        pytest.skip(f"needs {APP_ROLE}=1")
+    import psycopg
+    with psycopg.connect(target) as c, pytest.raises(psycopg.errors.InsufficientPrivilege):
+        c.execute(stmt)
+
+
+def test_app_role_keeps_the_writes_the_app_needs(target):
+    import os
+    if os.environ.get(APP_ROLE) != "1":
+        pytest.skip(f"needs {APP_ROLE}=1")
+    import psycopg
+    with psycopg.connect(target) as c:  # rolled back on exit (no commit)
+        c.execute("UPDATE users SET token_hash=token_hash, revoked_at=revoked_at, token_expires_at=token_expires_at")
+        for t in ("missions", "drivers", "vehicles", "pairing_codes", "ping_limit"):
+            assert c.execute("SELECT has_table_privilege(%s, 'UPDATE')", [t]).fetchone()[0], t
+        for t in ("pairing_codes", "ping_limit", "rate_events", "vehicle_pings"):
+            c.execute(f"DELETE FROM {t}")
+        c.rollback()
