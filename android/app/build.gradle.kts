@@ -2,7 +2,7 @@ import java.net.URI
 import java.util.Properties
 
 plugins {
-    id("com.android.application") version "9.0.1" // AGP 9 compiles Kotlin itself: no Kotlin plugin needed
+    id("com.android.application") version "9.5.1" // AGP 9 compiles Kotlin itself: no Kotlin plugin needed
 }
 
 // The driver web app URL: -Pambulance.baseUrl=... or `ambulance.baseUrl=...` in android/local.properties.
