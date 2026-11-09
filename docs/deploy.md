@@ -57,15 +57,18 @@ Updating: `docker compose restart backup` takes a fresh dump; wait for its `back
 
 ## Restore drill (monthly, and after any change to `ops/` or `docker-compose.yml`)
 
+Restore only dumps from your own storage (this host's `backups/` or your own offsite copy). A dump is a program for the database, so treat any file from elsewhere as untrusted.
+
 1. `ops/restore.sh backups/ambulance-YYYY-MM-DD.dump.gpg` (the newest file). It decrypts with `BACKUP_PASSPHRASE` from `.env`; a wrong passphrase stops it with "decryption failed".
-   - It loads the dump into a scratch database `restore_drill`, prints the row count of every table, and drops the scratch database.
-   - Live data is untouched.
+   - It refuses any file that was not really encrypted with `BACKUP_PASSPHRASE` ("not a dump encrypted with BACKUP_PASSPHRASE"), including a gpg file with no encryption at all. A plain `.dump` is refused unless you add `--unencrypted`; use that only for a dump you made yourself.
+   - It loads the dump into a scratch database `restore_drill` as `restore_loader`, a role without superuser rights that the script creates, prints the row count of every table, and drops the scratch database. A dump that tries to run programs or needs superuser rights fails with "permission denied".
+   - It does not change the live database.
 2. Check the counts are plausible: `missions` and `mission_audit` close to what the console shows, `alembic_version` 1.
 3. Write the date and the result in the "Verified" section below.
 
 **Real restore** (data lost or corrupted):
 - Run `ops/restore.sh backups/FILE.dump.gpg --live` and type `RESTORE` when asked.
-- The script first does the drill steps. It then stops `app` and `backup` and renames the live database to `ambulance_before_restore`. The restored copy becomes `ambulance`. `docker compose up -d` then upgrades the schema if needed and re-applies the grants.
+- The script first does the drill steps. It then stops `app` and `backup`, hands every restored object from `restore_loader` to `postgres`, and renames the live database to `ambulance_before_restore`. The restored copy becomes `ambulance`. `docker compose up -d` then upgrades the schema if needed and re-applies the grants.
 - Check the console. Then drop the old copy with the command the script prints.
 - On a new host, run `docker compose up -d` once before restoring, so that the `ambulance_app` role exists.
 
@@ -109,6 +112,8 @@ The first run used a backend from before amb-api's round, with a stand-in `/heal
 Third run, 2026-10-15: `main` at `eea84a7`, then with the chunked-body cap. The image built, `migrate` exited 0, `app` turned healthy, and `/healthz` through Caddy returned 200 `{"ok":true}`. A 70 KB chunked POST sent straight to the app (no Content-Length, past Caddy) returned 413. `docker compose down -v` cleaned up.
 
 Fourth run, 2026-10-27 (encrypted dumps and offsite copy; throwaway project, `BACKUP_OFFSITE` set to a local folder, `rclone.conf` empty): `backup` wrote `ambulance-DATE.dump.gpg` (gpg symmetric packet, no plain dump on disk). `offsite` logged `offsite ok: 1 dumps` and the folder held the same file. After `bootstrap admin`, `docker compose restart backup` and the drill on the `.gpg` file printed `users 1` and "drill OK". With a wrong passphrase the drill stopped with "decryption failed: Bad session key". A `change-me` passphrase made `backup` refuse to start. Not run: `--live` on an encrypted dump, a real offsite remote, the 20:30 UTC timer, the 15-day offsite delete.
+
+Fifth run, 2026-11-08 (restore checks; throwaway project `amb2t`, Caddy moved to ports 18800/18801, random secrets): after `bootstrap admin`, the nightly `.gpg` dump printed `users 1` and "drill OK". Refused with "not a dump encrypted with BACKUP_PASSPHRASE": a `gpg --store` file (no encryption) and that file glued in front of a real dump. A dump encrypted with the right passphrase whose table or view runs `COPY ... TO PROGRAM` failed with "permission denied" and wrote nothing in the `db` container. A plain `.dump` was refused without `--unencrypted` and restored with it. `--live` on the encrypted dump: `ambulance` and all its tables owned by `postgres`, `restore_loader` owns nothing, `migrate` re-applied the `ambulance_app` grants, `app` healthy. `docker compose down -v` cleaned up.
 
 Not checked:
 - a real host, DNS, or a Let's Encrypt certificate
