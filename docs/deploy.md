@@ -7,20 +7,22 @@ Status: run end to end on a laptop on 2026-10-14 (results below). Never run on a
 | `db` | postgres:16 | Data. Refuses to start with the `.env.example` placeholders or weak passwords. Not published on a host port. |
 | `migrate` | app image, one-shot | As the owner (`postgres`): runs migrations, then (re)creates the app's role `ambulance_app` with least privilege (`ops/migrate.py`). |
 | `app` | app image (`backend/Dockerfile`, hashed deps from `backend/requirements.lock`) | Connects as `ambulance_app`, not a superuser. Starts only after `migrate` succeeds. Health check: `GET /healthz`. Trusts Caddy's `X-Forwarded-For` (`FORWARDED_ALLOW_IPS`), so per-client limits see the phone's IP. |
-| `backup` | postgres:16 | `pg_dump` at start and nightly at 20:00 UTC (02:00 Dhaka), encrypted with `BACKUP_PASSPHRASE`, into `./backups/`, newest 14 kept (`ops/backup.sh`). |
-| `offsite` | rclone/rclone:1.68 | Off unless `COMPOSE_PROFILES=offsite`. Copies the encrypted dumps to `BACKUP_OFFSITE` at start and nightly at 20:30 UTC (`ops/offsite.sh`). |
+| `backup` | postgres:16 | `pg_dump` at start and nightly at 20:00 UTC (02:00 Dhaka), encrypted with `BACKUP_PASSPHRASE`, into `./backups/`, deleted after 14 days (`ops/backup.sh`). Health check: unhealthy when the newest dump is over 26 hours old. |
+| `offsite` | rclone/rclone:1.68 | Off unless `COMPOSE_PROFILES=offsite`. Copies the encrypted dumps to `BACKUP_OFFSITE` at start and nightly at 20:30 UTC, deletes copies there after 14 days (`ops/offsite.sh`). Health check: unhealthy when the last good copy is over 26 hours old. |
 | `caddy` | caddy:2 | TLS, security headers, gzip/zstd, 64 KB body cap, upstream health check. Starts after `app` is healthy. |
 
 ## First deploy
 
-1. Point DNS for your domain at the host; open ports 80 and 443. HTTPS is required: phone GPS does not work over plain HTTP.
+1. Point DNS for your domain at the host. Set up the firewall and SSH as in [Host](#host): only ports 22, 80 and 443 open. HTTPS is required: phone GPS does not work over plain HTTP.
 2. `cp .env.example .env`, set `DOMAIN`, and replace both passwords and `BACKUP_PASSPHRASE` with `openssl rand -hex 32`. Store `BACKUP_PASSPHRASE` off this host too (a password manager): without it no dump can be restored, and a lost host takes `.env` with it. Compose refuses to start when a password is empty, still a `change-me` placeholder, shorter than 24 characters, or contains anything but letters and digits (they go into connection URLs unescaped).
 3. `docker compose up -d --build`. Order: `db` healthy, then `migrate` runs and exits 0, then `app` and `backup` start, then `caddy` once `app` is healthy.
 4. Create the first admin (the token is printed once): `docker compose run --rm app python -m app.bootstrap admin NAME`. Give the dispatch desk dispatch-only accounts (`bootstrap dispatcher NAME`, or `POST /users` as admin). A stolen token: `docker compose run --rm app python -m app.bootstrap revoke USER_ID`.
    - Optional SMS fallback to drivers: set `AMBULANCE_SMS_API_KEY` and `AMBULANCE_SMS_SENDER_ID` in `.env` (see `backend/README.md`), then `docker compose up -d`.
    - Android driver app: set `AMBULANCE_ANDROID_CERT_SHA256` in `.env` to the release key's fingerprint (`docs/android-wrapper.md`), so the console's pairing QR opens the app instead of the browser.
 5. Open `https://DOMAIN/console/`; drivers use `https://DOMAIN/driver/`.
-6. Run the restore drill below once, now, and write down the date.
+6. Set up the offsite copy ([Backups](#backups), "Offsite copy") before any real data goes in. Until it runs, the dumps sit on the same disk as the database, so losing the host loses both.
+7. Set up the alert ([Health](#health), "Alert"), so a failed night or a dead host reaches your phone.
+8. Run the restore drill below once, now, and write down the date.
 
 Updating: `docker compose restart backup` takes a fresh dump; wait for its `backup ok` line in `docker compose logs backup`, then `git pull && docker compose up -d --build`. `up` re-runs `migrate`, which also gives new tables their grants. Rolling the image back after a new migration fails at `migrate` (Alembic cannot find the newer revision), so roll back by checking out the old commit and restoring that pre-update dump.
 
@@ -34,25 +36,63 @@ Updating: `docker compose restart backup` takes a fresh dump; wait for its `back
   - To change `APP_DB_PASSWORD`, edit `.env` and run `docker compose up -d`.
   - `POSTGRES_PASSWORD` is applied only when the volume is first created. To change it, run `docker compose exec db psql -U postgres -c "ALTER ROLE postgres PASSWORD 'NEW'"`, then edit `.env` and run `docker compose up -d`.
 - `/docs` and `/openapi.json` are served only when `AMBULANCE_DEV=1`. Never set it on a host.
+- **Containers** (`docker-compose.yml`): every service runs with `no-new-privileges`.
+  - `app`, `migrate`, `offsite` and `caddy` drop all Linux capabilities. `caddy` gets back only `NET_BIND_SERVICE`, for ports 80 and 443.
+  - `app` and `caddy` have a read-only root filesystem with a `tmpfs` for scratch files, plus memory and process limits (`app` 512 MB, `caddy` 256 MB, 200 processes each). Caddy's certificates live in the `caddy_data` volume.
+  - `db` and `backup` keep the default capabilities. The postgres entrypoint needs them to set up its data directory and drop to the `postgres` user, and `backup` runs as root because its entrypoint skips that drop.
+
+## Host
+
+Do this before step 1 of the first deploy (Ubuntu commands; adapt for other systems).
+
+- **Docker:** Docker Engine 25 or newer with the Compose plugin (`docker version`, `docker compose version`). The health checks use `start_interval`, which older engines reject.
+
+- **Firewall:** only SSH, HTTP and HTTPS.
+  - `ufw default deny incoming && ufw default allow outgoing && ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw enable`
+  - Docker writes its own iptables rules for published ports and bypasses UFW. That is why only `caddy` publishes ports. Never add `ports:` to `db` or `app`.
+- **SSH:** keys only, no root login.
+  - Copy your key first (`ssh-copy-id USER@HOST`) and check that a key login works.
+  - Then set `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin no` in a file under `/etc/ssh/sshd_config.d/`, and run `systemctl reload ssh`.
+  - Keep the current session open until a new key login works.
+- **Updates:** `apt install unattended-upgrades` for security patches. Plan a reboot for kernel updates; every service restarts on its own (`restart: unless-stopped`).
+
+## Logs
+
+- Every service logs to Docker's `json-file` driver with rotation: at most 5 files of 10 MB per container (the `x-defaults` anchor at the top of `docker-compose.yml`, applied with `<<: *defaults`). A new service must include `<<: *defaults` too.
+- Without rotation the logs would grow until the disk fills, and a full disk also stops the backups.
+- The app's access log records each request's client address, method, path and status, not request bodies, so GPS positions do not reach the logs. Rotation keeps these lines for days, not months.
+- Read them with `docker compose logs SERVICE`.
 
 ## Health
 
 - `GET /healthz` returns 200 `{"ok": true}`, or 503 when the database is down. On Postgres a dead database answers only after the pool's 30 s timeout. The Docker and Caddy checks time out sooner, and a timeout counts as a failure.
 - `docker compose ps` shows the app as `unhealthy` after about 30 s of failures. Nothing restarts it automatically.
 - Caddy checks `/healthz` every 10 s. While it fails, every request, including the console page, gets a 503 from Caddy. Dispatchers then switch to [runbook-downtime.md](runbook-downtime.md).
+- `backup` turns `unhealthy` when its newest dump is more than 26 hours old, so one missed night shows. `offsite` does the same when its last good copy is more than 26 hours old.
+- **Alert.** `docker compose ps` only shows these states, so add a dead-man check that pings an external monitor while everything is healthy.
+  - Create a check at a healthchecks.io-style service: a 15-minute period, a 1-hour grace time, and notifications to your phone. A missing ping then means a failed backup, an unhealthy app, or a dead host.
+  - Add a root cron entry on the host, e.g. `/etc/cron.d/ambulance-alert`. Use the folder that holds `docker-compose.yml`, add `offsite` to the list once it is on, and put your check's URL in place of `PING_URL`:
+    `*/15 * * * * root cd /srv/Ambulance-AID-BD && for s in app backup; do [ "$(docker compose ps --format '{{.Health}}' $s)" = healthy ] || exit 1; done && curl -fsS -m 10 --retry 3 -o /dev/null PING_URL`
+  - A stopped service has no health, so it stops the pings too.
+  - This does not see DNS, the certificate or Caddy from outside. The external uptime check below still matters.
 
 ## Backups
 
-- Files: `backups/ambulance-YYYY-MM-DD.dump.gpg` (pg_dump custom format, encrypted with gpg AES-256 from `BACKUP_PASSPHRASE`; the plain dump never touches the disk). The newest 14 are kept, counting any older unencrypted `.dump` files, which age out the same way. A same-day rerun replaces that day's file.
+- Files: `backups/ambulance-YYYY-MM-DD.dump.gpg` (pg_dump custom format, encrypted with gpg AES-256 from `BACKUP_PASSPHRASE`; the plain dump never touches the disk). A same-day rerun replaces that day's file.
+- Retention is 14 days, by file age: after every run, good or failed, `ops/backup.sh` deletes dumps (and any older unencrypted `.dump` files) from 14 nights ago or earlier. After many failed nights in a row, no dump is left. The health check and the alert below are there so that cannot happen unnoticed.
+- The same 14 days appear in `ops/offsite.sh`, `docs/pilot-plan.md` section 3, `docs/driver-consent-bn-draft.md` and `docs/pilot-agreement-draft.md`. Change them together.
 - `backup` refuses to start when `BACKUP_PASSPHRASE` is a `change-me` placeholder or shorter than 24 characters; compose refuses to start at all when it is unset.
 - Decrypt by hand (any machine with gpg): `gpg --decrypt backups/FILE.dump.gpg > FILE.dump`.
-- Failures appear only in the logs: `docker compose logs backup | grep FAILED`.
+- A failure prints `BACKUP FAILED` in `docker compose logs backup`, and `backup` turns `unhealthy` within 26 hours of the last good dump ([Health](#health)).
 - Deleted GPS pings (90-day retention) can survive in these dumps for up to 14 more days. `docs/pilot-plan.md` section 3 says so.
-- **Offsite copy** (the code is ready; the storage account is an OWNER TODO). Until it runs, the dumps sit on the same disk as the database, so losing the host loses both.
-  1. Choose storage with access keys, not a browser login (an S3-compatible bucket, Backblaze B2, or SFTP on another machine). Provider, account and region are the owner's call; whether it may be outside Bangladesh is a question for counsel (`docs/pilot-plan.md` section 3). Give the key write and delete rights on one bucket or folder only.
-  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work.
+- **Offsite copy** (step 6 of the first deploy). Until it runs, the dumps sit on the same disk as the database, so losing the host loses both.
+  1. Choose storage with access keys, not a browser login (an S3-compatible bucket, Backblaze B2, or SFTP on another machine). Provider, account and region are the owner's call; whether it may be outside Bangladesh is a question for counsel (`docs/pilot-plan.md` section 3).
+     - Preferred: a bucket with object lock (or versioning) and a 14-day lifecycle rule that deletes old copies, and a key that can write new files but not delete or overwrite them. A stolen host key then cannot wipe or replace the offsite copies. With this setup, the bucket enforces the 14 days, so in `ops/offsite.sh` replace the two lines from `if rclone copy` through `--min-age 14d; then` with this one line (keep the `then` branch below it as is):
+       `if rclone copy /backups "$BACKUP_OFFSITE" --include 'ambulance-*.dump.gpg'; then`
+     - Otherwise: give the key write and delete rights on one bucket or folder only. `ops/offsite.sh` then deletes copies older than 14 days.
+  2. Write `rclone.conf` next to `docker-compose.yml` (gitignored) with one remote, e.g. from `docker run --rm -it -v "$PWD:/config/rclone" rclone/rclone:1.68 config`. Create the file before step 3, or Docker mounts an empty directory in its place. It is mounted read-only, so remotes that refresh OAuth tokens will not work. Make it owned by root and readable only by root: `sudo chown root:root rclone.conf && sudo chmod 600 rclone.conf`. `offsite` runs as root with all capabilities dropped, so it cannot read a 0600 file that belongs to another user, and every run fails with `OFFSITE FAILED`.
   3. In `.env`: `BACKUP_OFFSITE=REMOTE:bucket/ambulance` and `COMPOSE_PROFILES=offsite`. Then `docker compose up -d`.
-  4. `docker compose logs offsite` shows `offsite ok: N dumps at ...` or `OFFSITE FAILED`. Copies older than 15 days are deleted there, so offsite keeps about the same 14 days as the host.
+  4. `docker compose logs offsite` shows `offsite ok: N dumps at ...` or `OFFSITE FAILED`, and `docker compose ps offsite` shows `healthy`. Copies older than 14 days are deleted there, the same as on the host. Add `offsite` to the alert's list of services.
   5. Only `*.dump.gpg` files leave the host. To restore from offsite on a new host: `docker run --rm -v "$PWD:/config/rclone" -v "$PWD/backups:/backups" rclone/rclone:1.68 copy REMOTE:bucket/ambulance /backups`, then the restore below.
 
 ## Restore drill (monthly, and after any change to `ops/` or `docker-compose.yml`)
@@ -115,15 +155,24 @@ Fourth run, 2026-10-27 (encrypted dumps and offsite copy; throwaway project, `BA
 
 Fifth run, 2026-11-08 (restore checks; throwaway project `amb2t`, Caddy moved to ports 18800/18801, random secrets): after `bootstrap admin`, the nightly `.gpg` dump printed `users 1` and "drill OK". Refused with "not a dump encrypted with BACKUP_PASSPHRASE": a `gpg --store` file (no encryption) and that file glued in front of a real dump. A dump encrypted with the right passphrase whose table or view runs `COPY ... TO PROGRAM` failed with "permission denied" and wrote nothing in the `db` container. A plain `.dump` was refused without `--unencrypted` and restored with it. `--live` on the encrypted dump: `ambulance` and all its tables owned by `postgres`, `restore_loader` owns nothing, `migrate` re-applied the `ambulance_app` grants, `app` healthy. `docker compose down -v` cleaned up.
 
+Sixth run, 2026-11-08 (container hardening, log rotation, time-based retention, backup health checks; throwaway project on `main` with this change, caddy on ports 18860/18861):
+- **Startup.** `docker compose up -d --build --wait` came up healthy: `db`, `app`, `backup` healthy, `migrate` exited 0, `caddy` running. `/healthz` and `/console/` through Caddy returned 200, plain HTTP returned 308.
+- **Hardening.** In `app` (uid 999) and `offsite`, `CapEff` was 0 and `NoNewPrivs` 1. In `caddy`, `CapEff` was `0x400` (`NET_BIND_SERVICE` only). Writing to `/srv` in `app` failed with "Read-only file system". `docker inspect` showed json-file with `max-size 10m`, `max-file 5`, 512 MB and 200 processes on `app`. With `DOMAIN=localhost`, Caddy logged that it could not install its local root certificate into the read-only system trust store. A real domain gets a public certificate and does not need that.
+- **Drill.** After `bootstrap admin` and `docker compose restart backup`, the restore drill printed `users 1` and "drill OK".
+- **Failed nights.** 20 seeded dumps, 2 to 21 days old, and a stub `pg_dump` that exits 1: `backup` logged `BACKUP FAILED`, deleted the dumps 14 days old and older (12 left, 2 to 13 days old), and showed `unhealthy`. Back on the real `pg_dump` it showed `healthy` again.
+- **Offsite.** With a local folder as the remote and copies 335, 359 and 361 hours old: the 359 h and 361 h copies were deleted, the 335 h copy was kept, today's dump was copied, and `offsite` showed `healthy` with no capabilities. A remote that does not exist gave `OFFSITE FAILED` and `unhealthy`.
+- `backend/tests/test_ops_backup.py` checks the retention in `ops/backup.sh` without Docker.
+
 Not checked:
 - a real host, DNS, or a Let's Encrypt certificate
 - the 20:00 UTC timer firing
-- 14-dump rotation over real days
+- 14-day retention over real days
+- the alert cron entry on a real host, UFW and the SSH settings
 - a reboot
 - a phone, the Leaflet map and the QR library (round B)
 
 ## Not done
 
 - **OWNER TODO: hosting account and host.** Choose the provider and region; in-country hosting is an open question for counsel.
-- **OWNER TODO: uptime alert to the owner's phone.** Use an external check of `https://DOMAIN/healthz`.
-- A real offsite storage account (above), log shipping, error tracking, a staging copy, rate limiting at the proxy, and tagged images for rollback.
+- **OWNER TODO: uptime alert to the owner's phone.** Use an external check of `https://DOMAIN/healthz`, next to the dead-man alert in [Health](#health).
+- Log shipping, error tracking, a staging copy, rate limiting at the proxy, and tagged images for rollback.

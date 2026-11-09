@@ -413,3 +413,9 @@ Agent-made, merged through GitHub PRs (not human-reviewed). Score unchanged: not
 - **Checks:** `scripts/check.sh` exit 0 (184 passed, 2 skipped, both orders, SQLite); Postgres as owner 185 passed, 1 skipped.
 
 **2026-11-08, agent (branch `agent/sec-ambulance-2`, not pushed):** `ops/restore.sh` now treats every dump as untrusted. A `.gpg` dump is printed only after gpg's status confirms it was decrypted with `BACKUP_PASSPHRASE`, a plain `.dump` needs `--unencrypted`, and the dump is loaded and counted as `restore_loader` (no superuser) with `--no-owner --no-privileges`. `--live` hands the objects to `postgres` before the swap. Checked in a throwaway compose project (`docs/deploy.md`, fifth run). `docs/deploy.md` now says to restore only dumps from your own storage.
+
+**2026-11-08, agent (branch `agent/sec-ambulance-5`, not pushed):** backups and host operations.
+- Retention is 14 days by file age on the host (`ops/backup.sh`, also after failed nights) and 14 days offsite (`ops/offsite.sh`, was 15). The 2026-10-27 entry above said 15 days for offsite.
+- `backup` and `offsite` get health checks that go `unhealthy` when the last good run is over 26 hours old. `docs/deploy.md` adds a host cron dead-man alert.
+- Every service: `no-new-privileges` and Docker log rotation (5 x 10 MB). `app`, `migrate`, `offsite` and `caddy` drop all capabilities (`caddy` keeps `NET_BIND_SERVICE`); `app` and `caddy` run read-only with memory and process limits.
+- `docs/deploy.md`: Host section (UFW, SSH keys only), Logs section, offsite setup moved to a first-deploy step. Checked in a throwaway compose project (`docs/deploy.md`, sixth run); `backend/tests/test_ops_backup.py` covers the retention.
