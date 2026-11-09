@@ -1,5 +1,6 @@
 body{font:15px/1.4 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1b1f24}
 [hidden]{display:none!important}
+#token{-webkit-text-security:disc} /* masked, but not a password field, so password managers do not keep tokens */
 header{display:flex;gap:1rem;align-items:center;padding:.6rem 1rem;background:#8b1a1a;color:#fff;flex-wrap:wrap}
 h1{font-size:1.15rem;margin:0}h2{font-size:1.05rem;margin:.2rem 0 .6rem}
 #missions-sec h2{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}

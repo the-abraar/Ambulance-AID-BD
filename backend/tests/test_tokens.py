@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.main import PAIR_CLIENT_FAILS, PAIR_CODE_TTL, PAIR_CODE_FAILS, PAIR_WINDOW_S
+from app.main import PAIR_CLIENT_FAILS, PAIR_CODE_TTL, PAIR_CODE_FAILS, PAIR_TYPED_FAILS, PAIR_WINDOW_S
 from tests.test_api import env, iso, mk  # noqa: F401
 
 
@@ -41,6 +41,28 @@ def test_rotate_own_token(env):
     assert c.get("/me", headers=env["D"]).status_code == 401
     assert c.get("/me", headers=bearer(tok)).json()["role"] == "dispatcher"
     assert c.post("/me/token/rotate").status_code == 401
+
+
+def test_sign_out_ends_the_token_on_the_server(env):
+    c, db = env["c"], env["db"]
+    mk(env)
+    assert c.get("/missions/current", headers=env["V"]).status_code == 200
+    assert c.post("/me/token/revoke").status_code == 401
+    assert c.post("/me/token/revoke", headers=env["V"]).status_code == 204
+    ping = {"lat": 23.81, "lng": 90.41, "ts": iso()}
+    assert c.get("/me", headers=env["V"]).status_code == 401
+    assert c.post(f"/vehicles/{env['veh']}/pings", json=ping, headers=env["V"]).status_code == 401
+    assert c.get("/missions/current", headers=env["V"]).status_code == 401
+    assert c.post("/me/token/revoke", headers=env["V"]).status_code == 401  # already over
+    assert c.get("/me", headers=env["V2"]).status_code == 200  # nobody else is touched
+    row = db.execute("SELECT actor_id, target_user_id, action FROM auth_audit ORDER BY id DESC LIMIT 1").fetchone()
+    uid = db.execute("SELECT user_id FROM drivers WHERE id=?", (env["drv"],)).fetchone()[0]
+    assert tuple(row) == (uid, uid, "signout")
+    # a dispatcher's sign-out ends that token too; a pairing code brings a driver back
+    assert c.post("/me/token/revoke", headers=env["P"]).status_code == 204
+    assert c.get("/me", headers=env["P"]).status_code == 401
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=env["D"]).json()["code"]
+    assert c.post("/pair", json={"driver_id": env["drv"], "code": code}).status_code == 200
 
 
 def test_concurrent_status_race_has_one_winner(env):
@@ -186,10 +208,13 @@ def test_pairing_code_flow(env):
     assert c.get("/me", headers=bearer(p.json()["token"])).json()["driver_id"] == env["drv"]
     assert c.get("/me", headers=env["V"]).status_code == 401  # old token rotated away
     assert c.post("/pair", json={"code": code}).status_code == 401  # single use
+    code = c.post(f"/drivers/{env['drv']}/pairing-code", headers=D).json()["code"]  # the QR link names the driver
+    assert c.post("/pair", json={"driver_id": env["drv2"], "code": code}).status_code == 401  # someone else's code
+    assert c.post("/pair", json={"driver_id": env["drv"], "code": code}).json()["user"]["driver_id"] == env["drv"]
     assert c.post("/pair", json={"code": "12345"}).status_code == 422
     assert c.post("/drivers/nope/pairing-code", headers=D).status_code == 404
     actions = [r["action"] for r in db.execute("SELECT action FROM auth_audit ORDER BY id")]
-    assert actions[-2:] == ["pairing_code", "pair"]
+    assert actions[-4:] == ["pairing_code", "pair", "pairing_code", "pair"]
 
 
 def test_pairing_code_expires_and_revoke_kills_it(env):
@@ -239,23 +264,38 @@ def test_n4_one_office_ip_survives_onboarding_day_typos(env):
     assert office.post("/pair", json={"code": code}).status_code == 200
 
 
-def test_n4_per_code_cap_keeps_guessing_infeasible(env):
-    code, other = code_for(env, env["drv"]), code_for(env, env["drv2"])
-    for i, w in enumerate(wrong_codes(PAIR_CODE_FAILS, code, other)):  # a distributed guesser: one try per address
-        assert phone(env, f"192.0.2.{i}").post("/pair", json={"code": w}).status_code == 401
-    # Both live codes took PAIR_CODE_FAILS wrong guesses and are dead, even when right; pairing itself is not paused.
-    assert phone(env, "192.0.2.250").post("/pair", json={"code": code}).status_code == 401
-    assert phone(env, "192.0.2.250").post("/pair", json={"code": other}).status_code == 401
-    fresh = code_for(env, env["drv"])
-    assert phone(env, "192.0.2.251").post("/pair", json={"code": fresh}).status_code == 200  # a new code works at once
-    # One short of the cap leaves a code alive.
+def pair_as(env, ip, did, code):
+    return phone(env, ip).post("/pair", json={"driver_id": did, "code": code}).status_code
+
+
+def test_n4_guesses_at_one_driver_never_touch_another_drivers_code(env):
+    a, b = code_for(env, env["drv"]), code_for(env, env["drv2"])
+    for i, w in enumerate(wrong_codes(PAIR_CODE_FAILS, a, b)):  # a guesser at driver A's code from 3 addresses
+        assert pair_as(env, f"192.0.2.{i % 3}", env["drv"], w) == 401
+    assert pair_as(env, "192.0.2.250", env["drv"], a) == 401  # A's code took PAIR_CODE_FAILS wrong guesses: dead
+    assert pair_as(env, "192.0.2.250", env["drv2"], b) == 200  # B's code lives on
+    assert pair_as(env, "192.0.2.251", env["drv"], code_for(env, env["drv"])) == 200  # a new code for A works at once
+    # One short of the cap leaves a code alive; an unknown driver id is just a wrong guess.
     c3 = code_for(env, env["drv2"])
     for i, w in enumerate(wrong_codes(PAIR_CODE_FAILS - 1, c3)):
-        phone(env, f"198.18.0.{i}").post("/pair", json={"code": w})
-    assert phone(env, "198.18.1.1").post("/pair", json={"code": c3}).status_code == 200
-    # The numbers: a code lives no longer than one window and takes at most PAIR_CODE_FAILS guesses.
+        pair_as(env, f"198.18.0.{i}", env["drv2"], w)
+    assert pair_as(env, "198.18.1.2", "no-such-driver", c3) == 401
+    assert pair_as(env, "198.18.1.1", env["drv2"], c3) == 200
+    assert phone(env, "198.18.1.3").post("/pair", json={"driver_id": "x" * 65, "code": c3}).status_code == 422
+
+
+def test_n4_typed_codes_share_a_budget_and_never_burn_codes(env):
+    a, b = code_for(env, env["drv"]), code_for(env, env["drv2"])
+    for i, w in enumerate(wrong_codes(PAIR_TYPED_FAILS, a, b)):  # typed guesses (no driver id), one per address
+        assert phone(env, f"192.0.2.{i}").post("/pair", json={"code": w}).status_code == 401
+    # Typing pauses for everyone until the window passes; the codes stay alive and the QR link still pairs.
+    assert phone(env, "192.0.2.250").post("/pair", json={"code": a}).status_code == 429
+    assert env["db"].execute("SELECT MAX(failures) FROM pairing_codes").fetchone()[0] == 0
+    assert pair_as(env, "192.0.2.251", env["drv"], a) == 200
+    assert pair_as(env, "192.0.2.252", env["drv2"], b) == 200
+    # The numbers: a code lives no longer than one window, and each way in takes at most 50 guesses at it.
     assert PAIR_CODE_TTL.total_seconds() <= PAIR_WINDOW_S
-    assert PAIR_CODE_FAILS / 10 ** 6 <= 1 / 20_000  # chance that a guesser takes over a given code
+    assert max(PAIR_CODE_FAILS, PAIR_TYPED_FAILS) / 10 ** 6 <= 1 / 20_000
     assert PAIR_CLIENT_FAILS >= 15  # an onboarding room gets more typos than it has drivers
 
 

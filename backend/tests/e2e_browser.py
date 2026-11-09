@@ -220,17 +220,17 @@ def run(base, dtok, ctok):
         def add_driver(name, phone=""):
             con.fill("#newd [name=name]", name); con.fill("#newd [name=phone]", phone); con.click("#newd button")
             con.wait_for_selector("#pair-dlg[open]")
-            code = con.inner_text("#pair-code")
-            ok(re.fullmatch(r"\d{6}", code) and con.inner_text("#pair-url") == f"{base}/driver/#pair={code}",
-               f"new driver {name} gets a 6-digit pairing code and the app link")
-            return code
-        code = add_driver("Rahim", "01711-234567")
+            code, url = con.inner_text("#pair-code"), con.inner_text("#pair-url")
+            m = re.fullmatch(re.escape(f"{base}/driver/#pair=") + r"([0-9a-f-]{36})\." + code, url)
+            ok(re.fullmatch(r"\d{6}", code) and m, f"new driver {name} gets a 6-digit pairing code and the app link with his id")
+            return m[1], code
+        rdid, code = add_driver("Rahim", "01711-234567")
         ok(con.eval_on_selector("#pair-qr", "c=>c.width>100&&c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v===0)"),
            "pairing dialog draws a QR code")
         ok(con.is_hidden("#newtok"), "no raw token shown when a driver is created")
-        shot(con, "console_1280_pairing.png", "console 1280x800, pairing dialog: 6-digit code, QR of /driver/#pair=CODE, expiry in Dhaka time")
+        shot(con, "console_1280_pairing.png", "console 1280x800, pairing dialog: 6-digit code, QR of /driver/#pair=DRIVER_ID.CODE, expiry in Dhaka time")
         con.click("#pair-dlg button")
-        dr_tok = call(base, "POST", "/pair", body={"code": code})["token"]
+        dr_tok = call(base, "POST", "/pair", body={"driver_id": rdid, "code": code})["token"]
         ok(api(base, dr_tok, "/me")["role"] == "driver", "the console's pairing code redeems at POST /pair")
         drow = con.locator("#drivers tbody tr:has-text('Rahim')")
         wait(con, "document.querySelector('#drivers tbody').textContent.includes('+8801711234567')")
@@ -443,6 +443,28 @@ def run(base, dtok, ctok):
         wait(con, "document.querySelector('#drivers tbody').textContent.includes('revoked')")
         ok(dead, "revoke: the token stops working and the list says revoked")
 
+        # sign-out: the console forgets the token and the server ends it; idle: the console forgets it (it stays valid)
+        so_tok = call(base, "POST", "/users", dtok, {"name": "desk pc"})["token"]
+        so = console_page(so_tok)
+        so.on("dialog", lambda d: d.accept())
+        with so.expect_navigation():  # the console reloads, so no mission or address stays on the page
+            so.click("#signout")
+        try:
+            api(base, so_tok, "/me"); ended = False
+        except urllib.error.HTTPError as e:
+            ended = e.code == 401
+        so.reload(); so.wait_for_selector("#token")
+        ok(so.evaluate("sessionStorage.getItem('tok')") is None and so.is_hidden("#signout") and so.is_visible("#login")
+           and ended, "Sign out: sessionStorage cleared, a reload shows the login form, and the token is ended on the server")
+        close(so)
+        idle = console_page(ctok, clock=True)
+        idle.route("**/missions?active=true", lambda r: r.fulfill(json=[]))  # the idle sign-out waits for a quiet board
+        with idle.expect_navigation():
+            idle.clock.fast_forward("31:00")
+        ok(idle.evaluate("sessionStorage.getItem('tok')") is None and api(base, ctok, "/me")["role"] == "dispatcher",
+           "30 idle minutes with no active mission: the console forgets the token, which stays valid for its owner")
+        close(idle)
+
         for w, hgt in ((375, 812), (768, 1024)):
             con.set_viewport_size({"width": w, "height": hgt}); con.evaluate("scrollTo(0, 0)")
             ok(con.evaluate("document.documentElement.scrollWidth") <= w, f"no sideways page scroll at {w} px")
@@ -637,15 +659,16 @@ def bridge_checks(b, base, atok, page_in):
     kid = call(base, "POST", "/drivers", atok, {"name": "Karim"})["driver_id"]
     call(base, "PUT", f"/vehicles/{vid}/driver", atok, {"driver_id": kid})
     code = lambda: call(base, "POST", f"/drivers/{kid}/pairing-code", atok)["code"]
+    link = lambda: f"{kid}.{code()}"  # the console's QR link: /driver/#pair=DRIVER_ID.CODE
     mission = lambda addr: call(base, "POST", "/missions", atok, {"pickup_address": addr, "assigned_vehicle_id": vid})["mission_id"]
     ctx = b.new_context(viewport={"width": 360, "height": 740}, geolocation={"latitude": 23.87, "longitude": 90.4},
                         permissions=["geolocation"], service_workers="block")
     ctx.add_init_script(BRIDGE)
     k = page_in(ctx)
     calls, tok = (lambda: k.evaluate("__calls")), (lambda: k.evaluate("localStorage.getItem('tok')"))
-    k.goto(base + "/driver/#pair=" + code())
+    k.goto(base + "/driver/#pair=" + link())
     k.wait_for_selector("#rf")
-    ok(k.evaluate("location.hash") == "" and "কোনো মিশন নেই" in k.inner_text("#app"), "QR link #pair=CODE signs in; the code leaves the URL")
+    ok(k.evaluate("location.hash") == "" and "কোনো মিশন নেই" in k.inner_text("#app"), "QR link #pair=DRIVER_ID.CODE signs in; the code leaves the URL")
     shot(k, "driver_360_paired_qr.png", "driver app 360x740 after opening the console's QR link, no mission")
 
     # lie-fi: a request that never answers gives up after 10 s with a visible message, which clears on the next answer
@@ -666,9 +689,15 @@ def bridge_checks(b, base, atok, page_in):
     k.click("#rf"); k.wait_for_selector("#ack")
     ok(calls() == [["start", {"baseUrl": base, "token": tok(), "vehicleId": vid, "missionId": mid, "shift": False}]],
        "bridge: startTracking(baseUrl, token, vehicleId, missionId) when the mission is active")
-    k.evaluate("c => { location.hash = '#pair=' + c; }", code())  # dispatcher re-pairs the phone: the token rotates
-    wait_until(lambda: len(calls()) == 2 and calls()[1][1]["token"] == tok() != calls()[0][1]["token"],
-               "bridge: startTracking again with the rotated token")
+    before = tok()
+    k.evaluate("c => { location.hash = '#pair=' + c; }", link())  # a pairing link while signed in: refused
+    k.wait_for_function("document.getElementById('status').textContent.includes('আগে বের হন')")
+    ok(tok() == before and k.evaluate("location.hash") == "" and k.is_visible("#ack"),
+       "a pairing link on a signed-in phone is refused ('sign out first'); localStorage tok unchanged")
+    call(base, "POST", f"/drivers/{kid}/token/revoke", atok)  # the phone's token is dead but the app has not noticed
+    k.evaluate("c => { location.hash = '#pair=' + c; }", link())
+    wait_until(lambda: tok() not in (None, before) and calls()[-1][0] == "start" and calls()[-1][1]["token"] == tok(),
+               "a pairing link on a phone whose token was revoked pairs; startTracking again with the new token")
     k.click("#ack"); k.wait_for_selector(".badge")
     call(base, "PATCH", f"/missions/{mid}/status", atok, {"status": "CANCELLED", "reason": "e2e"})
     k.click("#rf"); k.wait_for_selector(".card.ended")
@@ -710,9 +739,17 @@ def bridge_checks(b, base, atok, page_in):
 
     k.click("#lo"); k.click("dialog button[data-v='']")
     ok(tok() and k.is_visible("#ack"), "sign-out asks first; 'No' keeps the driver signed in")
+    old = tok()
     k.click("#lo"); k.click("dialog button[data-v='1']"); k.wait_for_selector("#code")
     ok(calls()[-1] == ["stop"] and tok() is None and k.evaluate("localStorage.getItem('driver_ping_queue')") is None,
        "confirmed sign-out stops native tracking and clears token and queue")
+
+    def dead(t):
+        try:
+            api(base, t, "/me"); return False
+        except urllib.error.HTTPError as e:
+            return e.code == 401
+    wait_until(lambda: dead(old), "sign-out also ends the token on the server (POST /me/token/revoke)")
     ok(k.evaluate("__watches") == 0, "bridge: since the reload the web GPS watch never ran, so no double pings")
 
     # N3: a hidden page never starts the wrapper's service (it would get no location); back on screen it starts at once

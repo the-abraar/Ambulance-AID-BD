@@ -1,8 +1,8 @@
 "use strict";
 // All dynamic text goes through h()/textContent, never innerHTML, so API data cannot inject markup.
-const ACK_MS = 120000, PAGE = 25, EXPIRY_WARN_MS = 7 * 86400000, DHAKA_CENTRE = [23.7808, 90.4125];
+const ACK_MS = 120000, PAGE = 25, EXPIRY_WARN_MS = 7 * 86400000, DHAKA_CENTRE = [23.7808, 90.4125], IDLE_MS = 30 * 60000;
 let token = "", me = null, vehicles = [], drivers = [], missions = [], transitions = {}, behalfMoves = {}, timer = null;
-let view = "active", offset = 0, pickup = null, audio = null, cancelling = null, behalf = null;
+let view = "active", offset = 0, pickup = null, audio = null, cancelling = null, behalf = null, lastInput = Date.now();
 try { token = sessionStorage.getItem("tok") || ""; } catch (e) { /* storage blocked: token lives in memory only */ }
 
 const $ = (id) => document.getElementById(id);
@@ -173,6 +173,8 @@ async function refresh() {
     const f = $("filter").value;
     let active;
     [vehicles, drivers, active] = await Promise.all([api("GET", "/vehicles"), api("GET", "/drivers"), api("GET", "/missions?active=true")]);
+    // Idle on a shared desk PC: forget the token here (it stays valid), but never while a mission is running.
+    if (!active.length && Date.now() - lastInput > IDLE_MS) return signOut(false);
     renderDrivers(); renderVehicles(); alarm(active);
     missions = view === "active" ? active.filter((m) => !f || m.status === f)
       : await api("GET", `/missions?limit=${PAGE}&offset=${offset}${f ? "&status=" + enc(f) : ""}`);
@@ -206,7 +208,7 @@ async function pairingCode(d) {
   try { showPairing(d.name, await api("POST", `/drivers/${enc(d.driver_id)}/pairing-code`)); } catch (e) { /* toast shown */ }
 }
 function showPairing(name, r) {
-  const url = `${location.origin}/driver/#pair=${r.code}`;
+  const url = `${location.origin}/driver/#pair=${r.driver_id}.${r.code}`; // the driver id: a wrong guess hits only this code
   $("pair-name").textContent = name; $("pair-code").textContent = r.code;
   $("pair-url").textContent = url; $("pair-exp").textContent = dhaka(r.expires_at);
   const q = qrcode(0, "M"), cv = $("pair-qr"), ctx = cv.getContext("2d"), s = 6, pad = 4;
@@ -244,11 +246,20 @@ async function showAudit(m) {
   } catch (e) { /* toast shown */ }
 }
 
+async function signOut(endToken) { // endToken: also end the token on the server (best effort)
+  clearInterval(timer); timer = null;
+  if (endToken) try { await api("POST", "/me/token/revoke"); } catch (e) { /* offline: still forget it here */ }
+  token = "";
+  try { sessionStorage.removeItem("tok"); } catch (e) { /* ignore */ }
+  location.reload(); // drops every mission, address and position from the page
+}
+
 async function connect() {
   try {
     me = await api("GET", "/me");
     if (me.role !== "dispatcher") { toast("403: this console needs a dispatcher token"); return; }
     $("who").textContent = me.admin ? "connected (admin)" : "connected (dispatcher)";
+    $("signout").hidden = false;
     for (const e of document.querySelectorAll(".admin-only")) e.hidden = !me.admin;
     // Fetched once: the rules never change while the page is open.
     [transitions, behalfMoves] = await Promise.all([api("GET", "/meta/transitions"), api("GET", "/meta/transitions?on_behalf=true")]);
@@ -261,6 +272,10 @@ async function connect() {
   } catch (e) { $("who").textContent = "not connected"; clearInterval(timer); }
 }
 
+for (const ev of ["keydown", "pointerdown", "wheel"]) addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true });
+$("signout").onclick = () => {
+  if (confirm(`Sign out and end this token? You will need ${me && me.admin ? "another admin (or the server's bootstrap command)" : "an admin"} to issue a new one.`)) signOut(true);
+};
 $("login").onsubmit = (e) => { e.preventDefault(); token = $("token").value.trim(); $("token").value = ""; connect(); };
 $("sound").onclick = () => { // the click is the user gesture browsers require before audio may play
   if (audio) { audio.close(); audio = null; } else { audio = new AudioContext(); beep(); }
