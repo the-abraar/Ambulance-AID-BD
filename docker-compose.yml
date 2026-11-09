@@ -8,7 +8,7 @@ x-defaults: &defaults
 services:
   db:  # keeps its default capabilities: the postgres entrypoint needs them to chown its data and drop to `postgres`
     <<: *defaults
-    image: postgres:16
+    image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
     restart: unless-stopped
     # Refuse the .env.example placeholders, short passwords, and characters that would break the postgresql:// URLs.
     entrypoint:
@@ -72,7 +72,7 @@ services:
       migrate: {condition: service_completed_successfully}
   backup:  # nightly encrypted pg_dump into ./backups, deleted after 14 days (ops/backup.sh); restore with ops/restore.sh
     <<: *defaults  # runs as root (its entrypoint skips the image's drop to `postgres`), so default capabilities stay
-    image: postgres:16
+    image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
     restart: unless-stopped
     entrypoint: [bash, /ops/backup.sh]
     environment:
@@ -92,7 +92,7 @@ services:
   offsite:  # only with COMPOSE_PROFILES=offsite: nightly copy of the encrypted dumps to BACKUP_OFFSITE (ops/offsite.sh)
     <<: *defaults
     cap_drop: [ALL]
-    image: rclone/rclone:1.68
+    image: rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
     profiles: [offsite]
     restart: unless-stopped
     entrypoint: [sh, /ops/offsite.sh]
@@ -112,7 +112,7 @@ services:
     tmpfs: [/tmp, /config]  # /config holds only Caddy's autosaved copy of the Caddyfile; certificates live in /data
     mem_limit: 256m
     pids_limit: 200
-    image: caddy:2
+    image: caddy:2@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc
     restart: unless-stopped
     ports: ["80:80", "443:443"]
     environment:

@@ -4,7 +4,7 @@ Mission state machine + FastAPI dispatch API. No signal preemption (see `docs/ar
 Not deployed. SQLite for dev; Postgres supported. API contract: `docs/api-spec/openapi.yaml` (a test fails if a route
 is missing from it).
 
-    python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+    python -m venv .venv && .venv/bin/pip install --require-hashes -r requirements-dev.lock
     .venv/bin/pytest
     export AMBULANCE_DEV=1                                 # dev only: allows dev.db and serves /docs
     .venv/bin/python -m app.bootstrap admin alice          # prints user_id + token once; only sha256 stored
@@ -16,6 +16,9 @@ is missing from it).
 
 Production installs `requirements.lock` (pinned, hashed): `pip install --require-hashes -r requirements.lock`.
 After changing `requirements.txt`, regenerate it with the command in the lock file's header (uv).
+Tests install `requirements-dev.lock` (hashed, constrained by `requirements.lock`, so CI and `scripts/check.sh` test
+the versions the image ships; CI fails if they differ). After changing either file, regenerate it with the command
+in its header.
 
 ## Environment
 

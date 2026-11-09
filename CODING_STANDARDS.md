@@ -10,4 +10,4 @@
 - Derive mock and fixture names and shapes from the real source (state machine, openapi.yaml); a test must fail on drift. Why: the driver app's state labels (`test_driver_app_labels_every_state`) and the e2e BN label map can silently diverge.
 - Mark unmeasured user-facing claims UNVERIFIED (response times, lives saved, legal compliance, Bangladesh data-protection). Why: this is safety-critical and pre-pilot.
 - Keep signal preemption out of code until the gates in `docs/roadmap.md` are met. Why: it needs government sign-off and a pentest.
-- Put dynamic text into the DOM via `textContent` or `esc()`; `// safe-html:` needs a real reason. Why: API data must never inject markup into the dispatcher console.
+- Put dynamic text into the DOM via `textContent` or `esc()`; `// safe-html:` needs a real reason. `scripts/lint-innerhtml.sh` flags every HTML sink (innerHTML, insertAdjacentHTML, Leaflet bindPopup/bindTooltip/divIcon, DOMParser and the rest) and every raw `${obj.field}` in a markup template; `scripts/lint-fixtures/sinks.js` lists the shapes it must catch. Why: API data must never inject markup into the dispatcher console.

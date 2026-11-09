@@ -1,24 +1,34 @@
 name: backend
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
         env: {POSTGRES_PASSWORD: test, POSTGRES_DB: ambulance_test}
         ports: ['5432:5432']
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: "3.11" }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 20 }
       - run: scripts/check.sh
       - name: pytest on Postgres
         run: |
-          pip install -r backend/requirements-dev.txt
+          pip install --require-hashes -r backend/requirements-dev.lock
           cd backend && TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/ambulance_test pytest
+      - name: tests ran on the versions the image ships (backend/requirements.lock)
+        run: |
+          norm() { awk -F'==' '{n=tolower($1); gsub(/[-_.]+/, "-", n); print n "==" $2}' | sort; }
+          want=$(grep -E '^[A-Za-z0-9_.-]+==[^ ;]+ \\$' backend/requirements.lock | cut -d' ' -f1 | norm)
+          [ -n "$want" ] || { echo "no pins parsed from requirements.lock"; exit 1; }
+          missing=$(comm -23 <(echo "$want") <(pip freeze | norm))
+          [ -z "$missing" ] || { echo "installed versions differ from requirements.lock:"; echo "$missing"; exit 1; }
       - name: pytest on Postgres as the least-privilege ambulance_app role
         run: cd backend && TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/ambulance_test TEST_DATABASE_APP_ROLE=1 pytest

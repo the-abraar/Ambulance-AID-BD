@@ -294,7 +294,7 @@ function render() {
   }
   if (q) h += `<p>${esc(t('queued'))}: ${q}</p>`;
   h += `<button class="sec" id="rf">${esc(t('refresh'))}</button> <button class="sec" id="lo">${esc(t('logout'))}</button>`;
-  a.innerHTML = h;
+  a.innerHTML = h; // safe-html: every value above goes through esc(), sl(), or the numeric/regex-checked navLink()/callLink()
   a.querySelectorAll('[data-s]').forEach(b => b.onclick = () => setStatus(b.dataset.s));
   if ($('al')) $('al').onclick = enableAlerts;
   if ($('ack')) $('ack').onclick = accept;

@@ -95,7 +95,7 @@ function renderMap() {
     const kind = p.stale ? "stale" : v.busy ? "busy" : "free";
     if (p.accuracy != null) L.circle([p.lat, p.lng], { radius: p.accuracy, className: "acc", interactive: false }).addTo(vehLayer);
     L.circleMarker([p.lat, p.lng], { radius: 8, className: "veh veh-" + kind, bubblingMouseEvents: false })
-      .bindTooltip(h("span", { textContent: `${v.registration} ${kind}` }), { permanent: true, direction: "right", offset: [8, 0] })
+      .bindTooltip(h("span", { textContent: `${v.registration} ${kind}` }), { permanent: true, direction: "right", offset: [8, 0] }) // safe-html: a DOM node built with textContent, not a string
       .on("click", () => { const s = $("newm").elements.veh; s.value = v.vehicle_id; if (!s.value || s.selectedOptions[0].disabled) s.selectedIndex = 0; })
       .addTo(vehLayer);
   }

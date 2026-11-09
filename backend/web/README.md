@@ -62,7 +62,8 @@ Caddy's `strict-origin-when-cross-origin` sends.
 | qrcode-generator (`qrcode.js`) | 1.4.4 | MIT, `vendor/qrcode/LICENSE` | `sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw==` |
 
 To upgrade, download the tarball from `registry.npmjs.org`, compare its sha512 with `dist.integrity`, and copy the same
-files. `scripts/lint-innerhtml.sh` skips `vendor/`: minified Leaflet is not ours to annotate.
+files. `scripts/lint-innerhtml.sh` skips `vendor/`: minified Leaflet is not ours to annotate. Every other HTML sink, and
+every raw `${obj.field}` inside a markup template, needs `esc()` plus a `// safe-html: <reason>` comment on its line.
 
 **Limits.**
 - English only.
