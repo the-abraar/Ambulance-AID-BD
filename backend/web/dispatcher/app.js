@@ -5,6 +5,7 @@ let token = "", me = null, vehicles = [], drivers = [], missions = [], transitio
 let view = "active", offset = 0, pickup = null, audio = null, cancelling = null, behalf = null, lastInput = Date.now();
 let missionsOkAt = Date.now(); // last successful fetch of the running missions
 let runningCount = null; // running missions at missionsOkAt; null until the first successful fetch
+let pollSeq = 0, missionsOkSeq = 0; // poll order, so an older reply never overwrites a newer one
 try { token = sessionStorage.getItem("tok") || ""; } catch (e) { /* storage blocked: token lives in memory only */ }
 
 const $ = (id) => document.getElementById(id);
@@ -171,9 +172,15 @@ function alarm(active) {
 
 async function refresh() {
   if (!token) return;
-  const [v, d, a] = await Promise.allSettled([api("GET", "/vehicles"), api("GET", "/drivers"), api("GET", "/missions?active=true")]);
+  // The idle timer's mission state is recorded as soon as this request answers (a slow /vehicles must not hide a running
+  // mission), and only if no newer poll has answered first (polls overlap every 5 s; a late empty reply must not win).
+  const seq = ++pollSeq;
+  const missionsReq = api("GET", "/missions?active=true").then((m) => {
+    if (seq > missionsOkSeq) { missionsOkSeq = seq; missionsOkAt = Date.now(); runningCount = m.length; }
+    return m;
+  });
+  const [v, d, a] = await Promise.allSettled([api("GET", "/vehicles"), api("GET", "/drivers"), missionsReq]);
   const active = a.status === "fulfilled" ? a.value : null;
-  if (active) { missionsOkAt = Date.now(); runningCount = active.length; }
   if (!active || v.status !== "fulfilled" || d.status !== "fulfilled") return; // toast already shown
   try {
     const f = $("filter").value;
