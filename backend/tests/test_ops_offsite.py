@@ -19,7 +19,7 @@ RCLONE = """#!/bin/sh
 cmd=$1; shift
 case $cmd in
   copy) echo "$*" > "$R/../copyargs"; [ -n "${FAIL_COPY:-}" ] && exit 1; cp -p "$1"/ambulance-*.dump.gpg "$R"/ 2>/dev/null; exit 0;;
-  delete) echo delete >> "$R/../calls"; [ -n "${FAIL_DELETE:-}" ] && exit 1
+  delete) echo "delete $*" >> "$R/../calls"; [ -n "${FAIL_DELETE:-}" ] && exit 1
           find "$R" -name 'ambulance-*.dump.gpg' -mtime +13 -delete;;
   lsf) ls "$R";;
 esac
@@ -45,8 +45,9 @@ def run_once(tmp_path, local=(), remote=(), **env):
 
 
 def test_good_run_copies_prunes_and_marks_healthy(tmp_path):
-    p, ok, remote, _, slept = run_once(tmp_path, local=[("ambulance-new.dump.gpg", 0)], remote=[("ambulance-old.dump.gpg", 20)])
+    p, ok, remote, calls, slept = run_once(tmp_path, local=[("ambulance-new.dump.gpg", 0)], remote=[("ambulance-old.dump.gpg", 20)])
     assert ok and remote == ["ambulance-new.dump.gpg"], p.stderr
+    assert "--min-age 13d" in calls  # nightly runs: deleting at 13 days keeps every copy under 14
     assert "newest ambulance-new.dump.gpg" in p.stdout
 
 

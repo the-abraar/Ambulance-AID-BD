@@ -1,7 +1,8 @@
 #!/bin/sh
 # Compose `offsite` sidecar (profile `offsite`, off by default): copies the encrypted dumps in ./backups to
 # $BACKUP_OFFSITE (an rclone remote from ./rclone.conf, e.g. `offsite:bucket/ambulance`) at start, then nightly at
-# 20:30 UTC, after ops/backup.sh. Copies older than 14 days are deleted there, the same retention as on the host,
+# 20:30 UTC, after ops/backup.sh. Copies 13 days old or more are deleted there on each run, so with a nightly run none
+# reaches 14 days unless this job is down (a failed run retries within the hour),
 # unless BACKUP_OFFSITE_PRUNE=0 (a bucket whose own lifecycle rules delete them and whose key cannot delete; then only
 # dumps under 2 days old are uploaded, so the lifecycle clock starts close to the dump's creation).
 # A run is good only when the copy and the cleanup both worked and the newest local dump is on the remote; it then
@@ -18,8 +19,8 @@ while :; do
   # (a long outage) stays on the host instead of living up to 14 more days offsite. docs/deploy.md, "Offsite copy".
   if [ "${BACKUP_OFFSITE_PRUNE:-1}" = 0 ]; then fresh="--max-age 2d"; else fresh=; fi
   rclone copy "$d" "$BACKUP_OFFSITE" --include "$inc" $fresh || ok=
-  # Runs even when the copy failed, so old copies never outlive the 14 days.
-  [ "${BACKUP_OFFSITE_PRUNE:-1}" = 0 ] || rclone delete "$BACKUP_OFFSITE" --include "$inc" --min-age 14d || ok=
+  # Runs even when the copy failed. 13d, not 14d: runs are a day apart, so a copy is gone before it turns 14 days old.
+  [ "${BACKUP_OFFSITE_PRUNE:-1}" = 0 ] || rclone delete "$BACKUP_OFFSITE" --include "$inc" --min-age 13d || ok=
   newest=$(cd "$d" && ls -t $inc 2>/dev/null | head -n 1)
   remote=$(rclone lsf "$BACKUP_OFFSITE" --include "$inc") || ok=
   s=$(( (73800 - $(date -u +%s) % 86400 + 86400) % 86400 ))
