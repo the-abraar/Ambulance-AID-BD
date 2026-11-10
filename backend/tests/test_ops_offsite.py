@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="needs sh")
 RCLONE = """#!/bin/sh
 cmd=$1; shift
 case $cmd in
-  copy) [ -n "${FAIL_COPY:-}" ] && exit 1; cp -p "$1"/ambulance-*.dump.gpg "$R"/ 2>/dev/null; exit 0;;
+  copy) echo "$*" > "$R/../copyargs"; [ -n "${FAIL_COPY:-}" ] && exit 1; cp -p "$1"/ambulance-*.dump.gpg "$R"/ 2>/dev/null; exit 0;;
   delete) echo delete >> "$R/../calls"; [ -n "${FAIL_DELETE:-}" ] && exit 1
           find "$R" -name 'ambulance-*.dump.gpg' -mtime +13 -delete;;
   lsf) ls "$R";;
@@ -36,7 +36,8 @@ def run_once(tmp_path, local=(), remote=(), **env):
         for name, age_days in files:
             f = folder / name; f.write_text("x"); t = time.time() - age_days * DAY; os.utime(f, (t, t))
     ok = tmp_path / "ok"
-    e = {**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}", "BACKUP_DIR": str(d), "R": str(r),
+    base = {k: v for k, v in os.environ.items() if k != "BACKUP_OFFSITE_PRUNE"}  # a host setting must not pick the mode
+    e = {**base, "PATH": f"{stubs}:{os.environ['PATH']}", "BACKUP_DIR": str(d), "R": str(r),
          "BACKUP_OFFSITE": "remote:x", "OFFSITE_OK_FILE": str(ok), **env}
     p = subprocess.run(["sh", str(SCRIPT)], env=e, capture_output=True, text=True, timeout=30)
     calls = (tmp_path / "calls").read_text() if (tmp_path / "calls").exists() else ""
@@ -70,3 +71,10 @@ def test_prune_off_skips_the_delete(tmp_path):
     p, ok, remote, calls, _ = run_once(tmp_path, local=[("ambulance-new.dump.gpg", 0)],
                                        remote=[("ambulance-old.dump.gpg", 20)], BACKUP_OFFSITE_PRUNE="0")
     assert ok and calls == "" and "ambulance-old.dump.gpg" in remote
+    # the bucket's lifecycle counts from upload, so only fresh dumps may go up
+    assert "--max-age 2d" in (tmp_path / "copyargs").read_text()
+
+
+def test_prune_on_uploads_every_dump(tmp_path):
+    run_once(tmp_path, local=[("ambulance-new.dump.gpg", 0)])
+    assert "--max-age" not in (tmp_path / "copyargs").read_text()
