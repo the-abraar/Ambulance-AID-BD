@@ -36,7 +36,8 @@ def run_once(tmp_path, local=(), remote=(), **env):
         for name, age_days in files:
             f = folder / name; f.write_text("x"); t = time.time() - age_days * DAY; os.utime(f, (t, t))
     ok = tmp_path / "ok"
-    e = {**os.environ, "PATH": f"{stubs}:{os.environ['PATH']}", "BACKUP_DIR": str(d), "R": str(r),
+    base = {k: v for k, v in os.environ.items() if k != "BACKUP_OFFSITE_PRUNE"}  # a host setting must not pick the mode
+    e = {**base, "PATH": f"{stubs}:{os.environ['PATH']}", "BACKUP_DIR": str(d), "R": str(r),
          "BACKUP_OFFSITE": "remote:x", "OFFSITE_OK_FILE": str(ok), **env}
     p = subprocess.run(["sh", str(SCRIPT)], env=e, capture_output=True, text=True, timeout=30)
     calls = (tmp_path / "calls").read_text() if (tmp_path / "calls").exists() else ""
