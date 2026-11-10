@@ -3,6 +3,8 @@
 const ACK_MS = 120000, PAGE = 25, EXPIRY_WARN_MS = 7 * 86400000, DHAKA_CENTRE = [23.7808, 90.4125], IDLE_MS = 30 * 60000;
 let token = "", me = null, vehicles = [], drivers = [], missions = [], transitions = {}, behalfMoves = {}, timer = null;
 let view = "active", offset = 0, pickup = null, audio = null, cancelling = null, behalf = null, lastInput = Date.now();
+let missionsOkAt = Date.now(); // last successful fetch of the running missions
+let runningCount = null; // running missions at missionsOkAt; null until the first successful fetch
 try { token = sessionStorage.getItem("tok") || ""; } catch (e) { /* storage blocked: token lives in memory only */ }
 
 const $ = (id) => document.getElementById(id);
@@ -169,12 +171,13 @@ function alarm(active) {
 
 async function refresh() {
   if (!token) return;
+  const [v, d, a] = await Promise.allSettled([api("GET", "/vehicles"), api("GET", "/drivers"), api("GET", "/missions?active=true")]);
+  const active = a.status === "fulfilled" ? a.value : null;
+  if (active) { missionsOkAt = Date.now(); runningCount = active.length; }
+  if (!active || v.status !== "fulfilled" || d.status !== "fulfilled") return; // toast already shown
   try {
     const f = $("filter").value;
-    let active;
-    [vehicles, drivers, active] = await Promise.all([api("GET", "/vehicles"), api("GET", "/drivers"), api("GET", "/missions?active=true")]);
-    // Idle on a shared desk PC: forget the token here (it stays valid), but never while a mission is running.
-    if (!active.length && Date.now() - lastInput > IDLE_MS) return signOut(false);
+    vehicles = v.value; drivers = d.value;
     renderDrivers(); renderVehicles(); alarm(active);
     missions = view === "active" ? active.filter((m) => !f || m.status === f)
       : await api("GET", `/missions?limit=${PAGE}&offset=${offset}${f ? "&status=" + enc(f) : ""}`);
@@ -272,6 +275,11 @@ async function connect() {
   } catch (e) { $("who").textContent = "not connected"; clearInterval(timer); }
 }
 
+// Idle on a shared desk PC: forget the token here (it stays valid), but never while a mission is known to be running.
+// Own timer, so a failed or stalled refresh can't keep the page open; mission state unknown for over IDLE_MS counts as nothing running.
+setInterval(() => {
+  if (token && Date.now() - lastInput > IDLE_MS && (runningCount === 0 || Date.now() - missionsOkAt > IDLE_MS)) signOut(false);
+}, 30000);
 for (const ev of ["keydown", "pointerdown", "wheel"]) addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true });
 $("signout").onclick = () => {
   if (confirm(`Sign out and end this token? You will need ${me && me.admin ? "another admin (or the server's bootstrap command)" : "an admin"} to issue a new one.`)) signOut(true);
