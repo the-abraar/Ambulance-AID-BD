@@ -33,8 +33,12 @@ case "$f" in
 esac
 
 sql -d postgres -c "DO \$\$BEGIN CREATE ROLE restore_loader LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$" \
-  -c 'ALTER ROLE restore_loader LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB' \
-  -c 'DROP DATABASE IF EXISTS restore_drill' -c 'CREATE DATABASE restore_drill OWNER restore_loader'
+  -c 'ALTER ROLE restore_loader LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB'
+# ALTER ROLE keeps role memberships: an old restore_loader in one of these could still run programs or touch server files.
+bad=$(sql -d postgres -c "SELECT string_agg(r, ', ') FROM unnest(ARRAY['pg_execute_server_program',
+  'pg_read_server_files', 'pg_write_server_files']) AS r WHERE pg_has_role('restore_loader', r, 'MEMBER')")
+[ -z "$bad" ] || { echo "refusing: restore_loader is a member of $bad; run DROP ROLE restore_loader (or revoke that) first" >&2; exit 1; }
+sql -d postgres -c 'DROP DATABASE IF EXISTS restore_drill' -c 'CREATE DATABASE restore_drill OWNER restore_loader'
 dec < "$f" | docker compose exec -T db pg_restore -U restore_loader -d restore_drill --no-owner --no-privileges --single-transaction
 echo "rows per table in $f:"
 # As restore_loader too: counting a view runs its functions as the caller.

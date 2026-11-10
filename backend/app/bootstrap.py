@@ -34,9 +34,12 @@ def auth_audit(db, actor: str, target: str, action: str) -> None:
     db.execute("INSERT INTO auth_audit (actor_id,target_user_id,action,ts) VALUES (?,?,?,?)", (actor, target, action, now()))
 
 
-def revoke_user(db, actor: str, uid: str, action: str = "revoke") -> bool:
-    """Revoke any user's token (and any live pairing code) until an admin issues a new one. False if unknown."""
-    if db.execute("UPDATE users SET revoked_at=? WHERE id=?", (now(), uid)).rowcount != 1:
+def revoke_user(db, actor: str, uid: str, action: str = "revoke", token_hash: str | None = None) -> bool:
+    """Revoke any user's token (and any live pairing code) until an admin issues a new one. False if unknown.
+
+    With `token_hash` (self sign-out) only that token is revoked: a token issued meanwhile by pairing or rotation stays."""
+    where, args = ("id=? AND token_hash=?", (now(), uid, token_hash)) if token_hash else ("id=?", (now(), uid))
+    if db.execute(f"UPDATE users SET revoked_at=? WHERE {where}", args).rowcount != 1:
         return False
     db.execute("DELETE FROM pairing_codes WHERE user_id=?", (uid,))
     auth_audit(db, actor, uid, action)

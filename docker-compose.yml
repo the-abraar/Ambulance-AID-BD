@@ -98,6 +98,7 @@ services:
     entrypoint: [sh, /ops/offsite.sh]
     environment:
       BACKUP_OFFSITE: ${BACKUP_OFFSITE:-}
+      BACKUP_OFFSITE_PRUNE: ${BACKUP_OFFSITE_PRUNE:-1}
     volumes: [./ops:/ops:ro, ./backups:/backups:ro, ./rclone.conf:/config/rclone/rclone.conf:ro]
     healthcheck:  # unhealthy when the last good copy (ops/offsite.sh touches the file) is over 26 hours old
       test: [CMD-SHELL, "find /tmp/offsite-ok -mmin -1560 | grep -q ."]

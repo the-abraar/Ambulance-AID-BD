@@ -65,6 +65,18 @@ def test_sign_out_ends_the_token_on_the_server(env):
     assert c.post("/pair", json={"driver_id": env["drv"], "code": code}).status_code == 200
 
 
+
+def test_sign_out_racing_a_new_token_leaves_the_new_token(env):
+    from app.bootstrap import revoke_user
+    from app.db import hash_token
+    c, db = env["c"], env["db"]
+    old = env["V"]["Authorization"][7:]
+    uid = db.execute("SELECT user_id FROM drivers WHERE id=?", (env["drv"],)).fetchone()[0]
+    tok = c.post(f"/drivers/{env['drv']}/token/rotate", headers=env["D"]).json()["token"]  # issued after sign-in began
+    assert not revoke_user(db, uid, uid, "signout", token_hash=hash_token(old))  # the sign-out of the old token lands late
+    db.commit()
+    assert c.get("/me", headers=bearer(tok)).status_code == 200
+
 def test_concurrent_status_race_has_one_winner(env):
     mid = mk(env)
     with ThreadPoolExecutor(8) as ex:

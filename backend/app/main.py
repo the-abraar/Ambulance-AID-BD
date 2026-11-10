@@ -700,8 +700,9 @@ def create_app(db_path: str | None = None, ping_max_age_s: float = 300, ping_min
         return new_token(db, u["id"], u["id"], reenable=False)  # old token stops working at once; new one shown once
 
     @app.post("/me/token/revoke", status_code=204)
-    def revoke_own_token(u: dict = Depends(user), db: Conn = Depends(get_db)):
-        revoke_user(db, u["id"], u["id"], "signout")  # sign-out ends the token here, not only on the device
+    def revoke_own_token(u: dict = Depends(user), authorization: str = Header(), db: Conn = Depends(get_db)):
+        # sign-out ends the token here, not only on the device; bound to this token, so a newer one issued meanwhile survives
+        revoke_user(db, u["id"], u["id"], "signout", token_hash=hash_token(authorization[7:]))
         db.commit()
 
     @app.post("/drivers/{did}/token/rotate")
