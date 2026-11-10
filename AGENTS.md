@@ -1,3 +1,5 @@
+Frozen until one named fleet agrees in writing to a 2-week shadow pilot (kill test 2026-12-15). Allowed now: security fixes, LEARNINGS.md, a demo page, and the docs-only sales kit if the owner says yes. Call source: `~/Everything/dev/products/decision.md` (November bet, default A).
+
 # AGENTS.md
 
 - Run `scripts/check.sh` before finishing (lint, JS syntax, unsafe HTML, OpenAPI validation, pytest forward and reverse). `--fast` = lint + stray files; it is the pre-commit hook.
