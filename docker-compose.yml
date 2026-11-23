@@ -8,7 +8,7 @@ x-defaults: &defaults
 services:
   db:  # keeps its default capabilities: the postgres entrypoint needs them to chown its data and drop to `postgres`
     <<: *defaults
-    image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
+    image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
     restart: unless-stopped
     # Refuse the .env.example placeholders, short passwords, and characters that would break the postgresql:// URLs.
     entrypoint:
@@ -72,7 +72,7 @@ services:
       migrate: {condition: service_completed_successfully}
   backup:  # nightly encrypted pg_dump into ./backups, deleted after 14 days (ops/backup.sh); restore with ops/restore.sh
     <<: *defaults  # runs as root (its entrypoint skips the image's drop to `postgres`), so default capabilities stay
-    image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
+    image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
     restart: unless-stopped
     entrypoint: [bash, /ops/backup.sh]
     environment:
